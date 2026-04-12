@@ -73,61 +73,102 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         // Note: Inside renderLabels, (0,0) is already this.leftPos, this.topPos
         super.renderLabels(guiGraphics, mouseX, mouseY);
-
-        Map<Item, Integer> requirements = this.menu.getBlockEntity().getRequiredItems();
-        if (requirements == null) return;
-
-        List<Map.Entry<Item, Integer>> reqList = new ArrayList<>(requirements.entrySet());
-        for (int i = 0; i < reqList.size(); i++) {
-            Slot slot = this.menu.slots.get(i);
-            if (!slot.hasItem()) {
-                // No need for leftPos/topPos here!
-                guiGraphics.renderFakeItem(new ItemStack(reqList.get(i).getKey()), slot.x, slot.y);
-                guiGraphics.fill(slot.x, slot.y, slot.x + 16, slot.y + 16, 0x80000000);
-            }
-        }
     }
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float delta) {
+        // 1. Draw the dark background tint
         renderBackground(guiGraphics);
+
+        // --- SLOT BYPASS TRICK ---
+        // We temporarily "empty" the 27 build slots so super.render()
+        // doesn't draw the vanilla solid items or the white quantity numbers.
+        ItemStack[] tempStacks = new ItemStack[27];
+        for (int i = 0; i < 27; i++) {
+            Slot slot = this.menu.slots.get(i);
+            tempStacks[i] = slot.getItem().copy(); // Store a copy of the real item
+            slot.set(ItemStack.EMPTY);             // Make the slot look empty to the super method
+        }
+
+        // 2. Call super to render the GUI frame, the Player Inventory, and Tooltips
         super.render(guiGraphics, mouseX, mouseY, delta);
 
-        // 1. Check for data updates
+        // 3. IMMEDIATELY restore the items so we can use them for our custom logic
+        for (int i = 0; i < 27; i++) {
+            this.menu.slots.get(i).set(tempStacks[i]);
+        }
+        // --- END TRICK ---
+
+        // 4. Update our cache (ensures we aren't doing Map conversions 100x a second)
         updateRequirementCache();
 
-        // 2. Use the cached list instead of creating a new one
         if (cachedReqList.isEmpty()) return;
 
+        // 5. Custom Requirement Rendering
         for (int i = 0; i < cachedReqList.size(); i++) {
             Slot slot = this.menu.slots.get(i);
             Item reqItem = cachedReqList.get(i).getKey();
             int totalNeeded = cachedReqList.get(i).getValue();
 
-            int currentInSlot = slot.hasItem() ? slot.getItem().getCount() : 0;
+            // Check what is physically in the slot right now
+            ItemStack stackInSlot = slot.getItem();
+            int currentInSlot = (stackInSlot.is(reqItem)) ? stackInSlot.getCount() : 0;
             int remaining = totalNeeded - currentInSlot;
 
-            if (remaining > 0) {
-                int x = this.leftPos + slot.x;
-                int y = this.topPos + slot.y;
+            int x = this.leftPos + slot.x;
+            int y = this.topPos + slot.y;
 
+            // --- DRAW ITEM LAYER ---
+            if (!stackInSlot.isEmpty()) {
+                // If user put an item in, draw the REAL item (no white number)
+                guiGraphics.renderItem(stackInSlot, x, y);
+                // Draw decorations (like durability bars) but pass empty string for the count
+                guiGraphics.renderItemDecorations(this.font, stackInSlot, x, y, "");
+            } else if (remaining > 0) {
+                // If slot is empty and we still need items, draw the GHOST block
                 ItemStack ghostStack = new ItemStack(reqItem);
-                ghostStack.setCount(1);
-
                 guiGraphics.renderFakeItem(ghostStack, x, y);
+            }
 
-                RenderSystem.enableBlend();
+            // --- DRAW OVERLAYS ---
+            RenderSystem.enableBlend();
+
+            if (remaining > 0) {
+                // LAYER A: DARK OVERLAY (As long as we still need items)
+                // Color: 60% black (0x99000000)
                 guiGraphics.fill(x, y, x + 16, y + 16, 0x99000000);
-                RenderSystem.disableBlend();
 
+                RenderSystem.disableBlend(); // Temporarily disable blend for the text
+
+                // --- DRAW TEXT LAYER (High Z-Index) ---
                 String text = String.valueOf(remaining);
                 guiGraphics.pose().pushPose();
-                guiGraphics.pose().translate(0, 0, 200);
-                guiGraphics.drawString(this.font, text, x + 17 - this.font.width(text), y + 9, 0xFFFFFF);
+
+                // Move the text to the absolute front (Z=250)
+                guiGraphics.pose().translate(0, 0, 250.0f);
+
+                int textX = x + 17 - this.font.width(text);
+                int textY = y + 9;
+
+                // Draw with shadow (true) for better readability
+                guiGraphics.drawString(this.font, text, textX, textY, 0xFFFFFF, true);
+
                 guiGraphics.pose().popPose();
+
+                // Re-enable blend for any subsequent overlaps
+                RenderSystem.enableBlend();
+
+            } else if (!stackInSlot.isEmpty() && currentInSlot >= totalNeeded) {
+                // THE NEW LAYER: GREEN OVERLAY (After cost is fully met)
+                // Color: 50% opacity Green (0x8000FF00)
+                // (Only draw if there's actually an item in the slot)
+                guiGraphics.fill(x, y, x + 16, y + 16, 0x8000FF00);
             }
+
+            RenderSystem.disableBlend(); // Final blend disable
         }
 
+        // 6. Finally, render the tooltips over everything else
         renderTooltip(guiGraphics, mouseX, mouseY);
     }
 

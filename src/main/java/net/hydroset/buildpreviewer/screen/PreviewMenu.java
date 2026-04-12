@@ -29,51 +29,52 @@ public class PreviewMenu extends AbstractContainerMenu {
         super(ModMenuTypes.PREVIEW_MENU.get(), containerId);
         this.blockEntity = (PreviewBlockEntity) entity;
 
-        // Create a final reference to the player from the inventory
         final Player menuPlayer = inv.player;
 
-        // Add Block Inventory Slots (3x9 grid)
         this.blockEntity.getCapability(ForgeCapabilities.ITEM_HANDLER).ifPresent(handler -> {
-            // 1. Convert the map to a fixed list so slot 0 always corresponds to item 0
             final Map<Item, Integer> reqs = this.blockEntity.getRequiredItems();
             final List<Item> itemList = new ArrayList<>(reqs.keySet());
 
+            // YOUR EXISTING LOOPS - Keep these exactly here
             for (int i = 0; i < 3; i++) {
                 for (int j = 0; j < 9; j++) {
-                    final int slotIndex = j + i * 9; // Must be final
+                    final int slotIndex = j + i * 9;
                     int x = 8 + j * 18;
                     int y = 18 + i * 18;
 
                     this.addSlot(new SlotItemHandler(handler, slotIndex, x, y) {
                         @Override
                         public boolean mayPickup(Player player) {
-                            // Block taking items out if in preview
                             return !net.hydroset.buildpreviewer.PreviewManager.isInPreview(player.getUUID());
                         }
 
                         @Override
                         public boolean mayPlace(ItemStack stack) {
-                            // 1. Block placing in preview
                             if (net.hydroset.buildpreviewer.PreviewManager.isInPreview(menuPlayer.getUUID())) return false;
 
-                            // 2. Check if this slot corresponds to a requirement
                             if (slotIndex < itemList.size()) {
                                 Item requiredItem = itemList.get(slotIndex);
-                                int requiredAmount = reqs.get(requiredItem);
+                                int totalNeeded = reqs.get(requiredItem);
                                 int currentAmount = this.getItem().getCount();
 
-                                // Only allow if item matches AND we need more
-                                return stack.is(requiredItem) && currentAmount < requiredAmount;
+                                // FIX: Only allow placing if the item matches AND the slot isn't already full
+                                return stack.is(requiredItem) && currentAmount < totalNeeded;
                             }
                             return false;
                         }
 
                         @Override
-                        public int getMaxStackSize(ItemStack stack) {
+                        public int getMaxStackSize() {
+                            // This handles the "hard limit" for dragging/dropping
                             if (slotIndex < itemList.size()) {
                                 return reqs.get(itemList.get(slotIndex));
                             }
-                            return super.getMaxStackSize(stack);
+                            return 64;
+                        }
+
+                        @Override
+                        public int getMaxStackSize(ItemStack stack) {
+                            return getMaxStackSize();
                         }
                     });
                 }
@@ -88,33 +89,72 @@ public class PreviewMenu extends AbstractContainerMenu {
     public ItemStack quickMoveStack(Player playerIn, int index) {
         ItemStack itemstack = ItemStack.EMPTY;
         Slot slot = this.slots.get(index);
+
         if (net.hydroset.buildpreviewer.PreviewManager.isInPreview(playerIn.getUUID())) {
             return ItemStack.EMPTY;
         }
+
         if (slot != null && slot.hasItem()) {
             ItemStack itemstack1 = slot.getItem();
             itemstack = itemstack1.copy();
 
-            // If the item is in the Block Entity (Slots 0-26)
+            // 1. FROM Block Entity (0-26) TO Player Inventory (27+)
             if (index < 27) {
-                // Try to move it to the Player Inventory (Slots 27-62)
                 if (!this.moveItemStackTo(itemstack1, 27, this.slots.size(), true)) {
                     return ItemStack.EMPTY;
                 }
             }
-            // If the item is in the Player Inventory
+            // 2. FROM Player Inventory (27+) TO Block Entity (0-26)
             else {
-                // Try to move it into the Block Entity (Slots 0-26)
-                if (!this.moveItemStackTo(itemstack1, 0, 27, false)) {
-                    return ItemStack.EMPTY;
+                boolean moved = false;
+                // We manually loop through our requirement slots to bypass the 64-stack limit
+                for (int i = 0; i < 27; i++) {
+                    Slot targetSlot = this.slots.get(i);
+
+                    // Check if this slot even accepts this item and isn't full
+                    if (targetSlot.mayPlace(itemstack1)) {
+                        int maxInside = targetSlot.getMaxStackSize(); // Your custom cost (e.g., 180)
+                        int currentInside = targetSlot.getItem().getCount();
+                        int canAccept = maxInside - currentInside;
+
+                        if (canAccept > 0) {
+                            int toMove = Math.min(canAccept, itemstack1.getCount());
+
+                            if (targetSlot.getItem().isEmpty()) {
+                                ItemStack newStack = itemstack1.copy();
+                                newStack.setCount(toMove);
+                                targetSlot.set(newStack);
+                            } else {
+                                targetSlot.getItem().grow(toMove);
+                            }
+
+                            itemstack1.shrink(toMove);
+                            targetSlot.setChanged();
+                            moved = true;
+                        }
+                    }
+
+                    // If we've moved the whole stack, stop looking at slots
+                    if (itemstack1.isEmpty()) break;
                 }
+
+                // If we couldn't move anything at all, return empty to stop the loop
+                if (!moved) return ItemStack.EMPTY;
             }
 
+            // Standard cleanup logic
             if (itemstack1.isEmpty()) {
                 slot.setByPlayer(ItemStack.EMPTY);
             } else {
                 slot.setChanged();
             }
+
+            // If nothing changed during the move, something went wrong
+            if (itemstack1.getCount() == itemstack.getCount()) {
+                return ItemStack.EMPTY;
+            }
+
+            slot.onTake(playerIn, itemstack1);
         }
 
         return itemstack;

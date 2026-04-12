@@ -34,6 +34,8 @@ public class PreviewManager {
         }
     }
 
+
+
     public static final Map<UUID, Map<BlockPos, BuildSnapshot>> pendingCommit = new HashMap<>();
     // Stores: Player UUID -> (Map of Location -> Original BlockState)
     private static final Map<UUID, Map<BlockPos, BlockState>> sessionChanges = new HashMap<>();
@@ -42,12 +44,36 @@ public class PreviewManager {
         if (isInPreview(playerId)) {
             Map<BlockPos, BlockState> changes = sessionChanges.computeIfAbsent(playerId, k -> new HashMap<>());
 
-            // If we haven't seen this block before, record it.
             if (!changes.containsKey(pos)) {
-                // Check: If the player just placed a block, 'originalState'
-                // should be what was there (Air).
                 changes.put(pos, originalState);
             }
+        } else {
+            // IF NOT IN PREVIEW: If the player places a block manually,
+            // we must remove it from the "Pending Commit" so the mod
+            // stops trying to roll it back or track it as a preview.
+            pendingCommit.forEach((uuid, map) -> {
+                if (map.containsKey(pos)) {
+                    map.remove(pos);
+                }
+            });
+        }
+    }
+
+    public static void restoreBuildFromSave(UUID playerUUID, BlockPos entityPos) {
+        // Only restore if the manager doesn't already have them in memory
+        if (!pendingCommit.containsKey(playerUUID)) {
+
+            // 1. You need to get the list of blocks that were being previewed.
+            // If you saved the blueprint/schematic to the BlockEntity,
+            // you'd retrieve it here. For now, we'll tell the manager
+            // this player is "In Preview" again.
+
+            // Example: If your Toggle logic normally creates the list,
+            // you might call a shared method here:
+            // List<BlockPos> blueprint = calculateBlueprint(entityPos);
+            // pendingCommit.put(playerUUID, blueprint);
+
+            System.out.println("Restored preview session for: " + playerUUID);
         }
     }
 

@@ -51,6 +51,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     }
 
 
+
     @Nullable
     @Override
     public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player player) {
@@ -60,9 +61,14 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     // 1. Send the data to the client when they arrive
     @Override
     public CompoundTag getUpdateTag() {
-        CompoundTag tag = new CompoundTag();
-        saveAdditional(tag); // This calls your custom save logic
-        return tag;
+        // This sends data when the chunk loads or the player joins
+        return saveWithoutMetadata();
+    }
+
+    @Override
+    public void handleUpdateTag(CompoundTag tag) {
+        // This receives that data on the Client side
+        load(tag);
     }
 
     // 2. Packet sync (Standard for 1.20.1)
