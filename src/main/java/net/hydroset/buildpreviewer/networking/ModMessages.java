@@ -17,6 +17,7 @@ public class ModMessages {
         return packetId++;
     }
 
+    // Inside your ModMessages.java or PacketHandler.java
     public static void register() {
         SimpleChannel net = NetworkRegistry.ChannelBuilder
                 .named(new ResourceLocation(BuildPreviewer.MOD_ID, "messages"))
@@ -27,11 +28,18 @@ public class ModMessages {
 
         INSTANCE = net;
 
-        // Register the specific packet
+        // Register Toggle (ID 0)
         net.messageBuilder(TogglePreviewPacket.class, id(), NetworkDirection.PLAY_TO_SERVER)
                 .decoder(TogglePreviewPacket::new)
                 .encoder(TogglePreviewPacket::toBytes)
                 .consumerMainThread(TogglePreviewPacket::handle)
+                .add();
+
+        // REGISTER FINALIZE (ID 1) - THIS IS THE MISSING STEP
+        net.messageBuilder(FinalizeBuildPacket.class, id(), NetworkDirection.PLAY_TO_SERVER)
+                .decoder(FinalizeBuildPacket::new)
+                .encoder(FinalizeBuildPacket::toBytes)
+                .consumerMainThread(FinalizeBuildPacket::handle)
                 .add();
     }
 
