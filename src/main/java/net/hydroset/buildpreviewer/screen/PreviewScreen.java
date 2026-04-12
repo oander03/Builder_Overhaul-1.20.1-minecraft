@@ -42,11 +42,12 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     @Override
     protected void init() {
         super.init();
-        // Add the button to the right of the GUI
+
+        // If you added the getter above, this will now work:
+        net.minecraft.core.BlockPos pos = this.menu.getBlockEntity().getBlockPos();
+
         this.addRenderableWidget(Button.builder(Component.literal("Toggle Preview"), (button) -> {
-                    // Send the packet we made in step 3
-                    ModMessages.sendToServer(new TogglePreviewPacket());
-                    // 2. Close the menu immediately on the client side
+                    ModMessages.sendToServer(new TogglePreviewPacket(pos));
                     this.onClose();
                 })
                 .bounds(this.leftPos + this.imageWidth + 5, this.topPos + 20, 80, 20)

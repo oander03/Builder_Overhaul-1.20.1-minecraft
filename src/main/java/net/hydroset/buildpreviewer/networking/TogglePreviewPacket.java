@@ -1,6 +1,7 @@
 package net.hydroset.buildpreviewer.networking;
 
 import net.hydroset.buildpreviewer.PreviewManager;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
@@ -8,26 +9,33 @@ import net.minecraftforge.network.NetworkEvent;
 import java.util.function.Supplier;
 
 public class TogglePreviewPacket {
+    private final BlockPos pos;
 
-    // Empty constructor required for registration
-    public TogglePreviewPacket() {}
+    // Constructor for the Client to create the packet
+    public TogglePreviewPacket(BlockPos pos) {
+        this.pos = pos;
+    }
 
-    // Reading from the network (even if empty, required by Forge)
-    public TogglePreviewPacket(FriendlyByteBuf buf) {}
+    // Constructor for the Server to reconstruct the packet from the buffer
+    public TogglePreviewPacket(FriendlyByteBuf buf) {
+        this.pos = buf.readBlockPos();
+    }
 
-    // Writing to the network
-    public void toBytes(FriendlyByteBuf buf) {}
+    // Writing the position to the buffer
+    public void toBytes(FriendlyByteBuf buf) {
+        buf.writeBlockPos(this.pos);
+    }
 
     public boolean handle(Supplier<NetworkEvent.Context> supplier) {
         NetworkEvent.Context context = supplier.get();
         context.enqueueWork(() -> {
-            // HERE IS THE SERVER SIDE LOGIC
             ServerPlayer player = context.getSender();
             if (player != null) {
                 if (PreviewManager.isInPreview(player.getUUID())) {
                     PreviewManager.exitPreview(player);
                 } else {
-                    PreviewManager.enterPreview(player);
+                    // Pass the position from the packet to the manager
+                    PreviewManager.enterPreview(player, this.pos);
                 }
             }
         });

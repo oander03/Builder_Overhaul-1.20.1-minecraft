@@ -33,6 +33,19 @@ public class PreviewBlock extends Block implements EntityBlock {
     }
 
     @Override
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        if (state.getBlock() != newState.getBlock()) {
+            BlockEntity blockEntity = level.getBlockEntity(pos);
+            if (blockEntity instanceof PreviewBlockEntity) {
+                // Drop the contents of the Capability/Inventory
+                // This assumes you are using ItemStackHandler or a SimpleContainer
+                ((PreviewBlockEntity) blockEntity).drops();
+            }
+        }
+        super.onRemove(state, level, pos, newState, isMoving);
+    }
+
+    @Override
     public InteractionResult use(BlockState state, Level level, BlockPos pos,
                                  Player player, InteractionHand hand, BlockHitResult hit) {
 

@@ -76,6 +76,10 @@ public class PreviewMenu extends AbstractContainerMenu {
         return true;
     }
 
+    public PreviewBlockEntity getBlockEntity() {
+        return this.blockEntity;
+    }
+
     private void addPlayerInventory(Inventory playerInventory) {
         for (int i = 0; i < 3; ++i) {
             for (int l = 0; l < 9; ++l) {

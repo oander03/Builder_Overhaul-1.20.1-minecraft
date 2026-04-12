@@ -1,11 +1,8 @@
 package net.hydroset.buildpreviewer;
 
-import net.hydroset.buildpreviewer.block.ModBlocks;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -17,12 +14,14 @@ public class PreviewEvents {
     @SubscribeEvent
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
         Player player = event.getPlayer();
-
-        // If the player is in "Preview Mode"
         if (PreviewManager.isInPreview(player.getUUID())) {
-            // If they are trying to break the Access Block, STOP them
-            if (event.getState().is(ModBlocks.BUILDACCESS_BLOCK.get())) {
+            BlockPos targetPos = event.getPos();
+            BlockPos anchorPos = PreviewManager.getAnchorPos(player.getUUID());
+
+            // Check if the block being broken is the specific anchor block
+            if (targetPos.equals(anchorPos)) {
                 event.setCanceled(true);
+                player.displayClientMessage(Component.literal("You cannot break the anchor block while in preview!"), true);
             }
         }
     }
@@ -30,19 +29,15 @@ public class PreviewEvents {
     @SubscribeEvent
     public static void onPlayerInteract(PlayerInteractEvent.RightClickBlock event) {
         Player player = event.getEntity();
-        Level level = event.getLevel();
-        BlockPos pos = event.getPos();
-
-        // If the player is in "Preview Mode"
         if (PreviewManager.isInPreview(player.getUUID())) {
-            BlockState state = level.getBlockState(pos);
+            BlockPos clickedPos = event.getPos();
+            BlockPos anchorPos = PreviewManager.getAnchorPos(player.getUUID());
 
-            // If the block they clicked is NOT the Access Block, STOP the interaction
-            if (!state.is(ModBlocks.BUILDACCESS_BLOCK.get())) {
+            // If the position clicked is NOT the exact coordinate of the starting block
+            if (!clickedPos.equals(anchorPos)) {
                 event.setCanceled(true);
-                // Optional: send a message so they know why
-                if (!level.isClientSide) {
-                    player.displayClientMessage(Component.literal("You can only interact with the Access Block in Preview!"), true);
+                if (!event.getLevel().isClientSide) {
+                    player.displayClientMessage(Component.literal("You can only interact with your original Access Block!"), true);
                 }
             }
         }

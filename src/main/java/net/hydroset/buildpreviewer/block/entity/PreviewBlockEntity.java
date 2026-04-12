@@ -5,7 +5,9 @@ import net.hydroset.buildpreviewer.screen.PreviewMenu;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.Containers;
 import net.minecraft.world.MenuProvider;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -44,6 +46,16 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         super.load(nbt);
         // Load the items from the save file
         itemHandler.deserializeNBT(nbt.getCompound("inventory"));
+    }
+
+    public void drops() {
+        // Replace 'itemHandler' with the name of your ItemStackHandler variable
+        SimpleContainer inventory = new SimpleContainer(itemHandler.getSlots());
+        for (int i = 0; i < itemHandler.getSlots(); i++) {
+            inventory.setItem(i, itemHandler.getStackInSlot(i));
+        }
+
+        Containers.dropContents(this.level, this.worldPosition, inventory);
     }
 
     @Override
