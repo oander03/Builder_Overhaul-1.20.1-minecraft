@@ -46,6 +46,8 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         this.addRenderableWidget(Button.builder(Component.literal("Toggle Preview"), (button) -> {
                     // Send the packet we made in step 3
                     ModMessages.sendToServer(new TogglePreviewPacket());
+                    // 2. Close the menu immediately on the client side
+                    this.onClose();
                 })
                 .bounds(this.leftPos + this.imageWidth + 5, this.topPos + 20, 80, 20)
                 .build());

@@ -17,7 +17,10 @@ public class PreviewManager {
     public static void enterPreview(ServerPlayer player) {
         UUID id = player.getUUID();
         previousGameModes.put(id, player.gameMode.getGameModeForPlayer());
+
         playersInPreview.add(id);
+
+
         player.setGameMode(GameType.CREATIVE);
     }
 

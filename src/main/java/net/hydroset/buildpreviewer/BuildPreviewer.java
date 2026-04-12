@@ -4,6 +4,7 @@ import net.hydroset.buildpreviewer.block.entity.ModBlockEntities;
 import net.hydroset.buildpreviewer.item.ModItems;
 import net.hydroset.buildpreviewer.block.ModBlocks;
 import com.mojang.logging.LogUtils;
+import net.hydroset.buildpreviewer.networking.ModMessages;
 import net.hydroset.buildpreviewer.screen.ModMenuTypes;
 import net.hydroset.buildpreviewer.screen.PreviewScreen;
 import net.minecraft.client.gui.screens.MenuScreens;
@@ -43,6 +44,11 @@ public class BuildPreviewer
         ModBlocks.register(modEventBus);
         ModBlockEntities.register(modEventBus);
         ModMenuTypes.register(modEventBus);
+        modEventBus.addListener(this::clientSetup);
+
+
+        // 2. IMPORTANT: Initialize the Networking Channel
+        ModMessages.register();
 
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);
@@ -59,6 +65,7 @@ public class BuildPreviewer
     // Inside the main class
     private void clientSetup(final FMLClientSetupEvent event) {
         event.enqueueWork(() -> {
+            // This links the Menu to the Screen
             MenuScreens.register(ModMenuTypes.PREVIEW_MENU.get(), PreviewScreen::new);
         });
     }
