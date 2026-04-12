@@ -1,6 +1,9 @@
 package net.hydroset.buildpreviewer.screen;
 
+import net.hydroset.buildpreviewer.PreviewManager;
 import net.hydroset.buildpreviewer.block.entity.PreviewBlockEntity;
+import net.hydroset.buildpreviewer.networking.ModMessages;
+import net.hydroset.buildpreviewer.networking.ServerboundScrollPacket;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
@@ -16,8 +19,46 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import static java.awt.SystemColor.menu;
+
 public class PreviewMenu extends AbstractContainerMenu {
     private final PreviewBlockEntity blockEntity;
+
+    public int scrollOffset = 0;
+
+    public void scrollTo(int newOffset) {
+        int totalItems = blockEntity.getRequiredItems().size();
+        int totalRows = (int) Math.ceil(totalItems / 9.0);
+        int maxScroll = Math.max(0, totalRows - 3);
+        this.scrollOffset = Math.max(0, Math.min(newOffset, maxScroll));
+
+        // Force the slots to point to new data indices
+        for (int i = 0; i < 27; i++) {
+            if (this.slots.get(i) instanceof ScrollableSlot scrollSlot) {
+                scrollSlot.setIndex((scrollOffset * 9) + i);
+            }
+        }
+
+        if (this.blockEntity.getLevel().isClientSide) {
+            // TELL THE SERVER: "Hey, I scrolled!"
+            ModMessages.sendToServer(new ServerboundScrollPacket(this.scrollOffset));
+        } else {
+            // THE SERVER'S TURN:
+            // 1. Tell the server-side slots to update too
+            // 2. Force a full inventory sync back to the client
+            this.broadcastChanges();
+            this.sendAllDataToRemote();
+        }
+    }
+
+    private void updateSlotIndexes() {
+        for (int i = 0; i < 27; i++) {
+            if (this.slots.get(i) instanceof ScrollableSlot scrollSlot) {
+                scrollSlot.setIndex((scrollOffset * 9) + i);
+            }
+        }
+    }
+
 
     // Client-side constructor
     public PreviewMenu(int containerId, Inventory inv, FriendlyByteBuf extraData) {
@@ -35,14 +76,14 @@ public class PreviewMenu extends AbstractContainerMenu {
             final Map<Item, Integer> reqs = this.blockEntity.getRequiredItems();
             final List<Item> itemList = new ArrayList<>(reqs.keySet());
 
-            // YOUR EXISTING LOOPS - Keep these exactly here
             for (int i = 0; i < 3; i++) {
                 for (int j = 0; j < 9; j++) {
                     final int slotIndex = j + i * 9;
                     int x = 8 + j * 18;
                     int y = 18 + i * 18;
 
-                    this.addSlot(new SlotItemHandler(handler, slotIndex, x, y) {
+                    // Use ScrollableSlot instead of SlotItemHandler
+                    this.addSlot(new ScrollableSlot(handler, slotIndex, x, y) {
                         @Override
                         public boolean mayPickup(Player player) {
                             return !net.hydroset.buildpreviewer.PreviewManager.isInPreview(player.getUUID());
@@ -52,29 +93,23 @@ public class PreviewMenu extends AbstractContainerMenu {
                         public boolean mayPlace(ItemStack stack) {
                             if (net.hydroset.buildpreviewer.PreviewManager.isInPreview(menuPlayer.getUUID())) return false;
 
-                            if (slotIndex < itemList.size()) {
-                                Item requiredItem = itemList.get(slotIndex);
+                            // Get the requirement based on the CURRENT scrolled index
+                            int currentIndex = getSlotIndex();
+                            if (currentIndex < itemList.size()) {
+                                Item requiredItem = itemList.get(currentIndex);
                                 int totalNeeded = reqs.get(requiredItem);
-                                int currentAmount = this.getItem().getCount();
-
-                                // FIX: Only allow placing if the item matches AND the slot isn't already full
-                                return stack.is(requiredItem) && currentAmount < totalNeeded;
+                                return stack.is(requiredItem) && this.getItem().getCount() < totalNeeded;
                             }
                             return false;
                         }
 
                         @Override
                         public int getMaxStackSize() {
-                            // This handles the "hard limit" for dragging/dropping
-                            if (slotIndex < itemList.size()) {
-                                return reqs.get(itemList.get(slotIndex));
+                            int currentIndex = getSlotIndex();
+                            if (currentIndex < itemList.size()) {
+                                return reqs.get(itemList.get(currentIndex));
                             }
                             return 64;
-                        }
-
-                        @Override
-                        public int getMaxStackSize(ItemStack stack) {
-                            return getMaxStackSize();
                         }
                     });
                 }
@@ -90,73 +125,57 @@ public class PreviewMenu extends AbstractContainerMenu {
         ItemStack itemstack = ItemStack.EMPTY;
         Slot slot = this.slots.get(index);
 
-        if (net.hydroset.buildpreviewer.PreviewManager.isInPreview(playerIn.getUUID())) {
-            return ItemStack.EMPTY;
-        }
-
         if (slot != null && slot.hasItem()) {
             ItemStack itemstack1 = slot.getItem();
             itemstack = itemstack1.copy();
 
-            // 1. FROM Block Entity (0-26) TO Player Inventory (27+)
+            // 1. FROM Screen Slots (0-26) TO Player Inventory (27+)
             if (index < 27) {
                 if (!this.moveItemStackTo(itemstack1, 27, this.slots.size(), true)) {
                     return ItemStack.EMPTY;
                 }
             }
-            // 2. FROM Player Inventory (27+) TO Block Entity (0-26)
+            // 2. FROM Player Inventory TO Block Entity (The fix is here)
             else {
                 boolean moved = false;
-                // We manually loop through our requirement slots to bypass the 64-stack limit
-                for (int i = 0; i < 27; i++) {
-                    Slot targetSlot = this.slots.get(i);
+                var handler = this.blockEntity.getCapability(ForgeCapabilities.ITEM_HANDLER).orElse(null);
 
-                    // Check if this slot even accepts this item and isn't full
-                    if (targetSlot.mayPlace(itemstack1)) {
-                        int maxInside = targetSlot.getMaxStackSize(); // Your custom cost (e.g., 180)
-                        int currentInside = targetSlot.getItem().getCount();
-                        int canAccept = maxInside - currentInside;
+                if (handler != null) {
+                    Map<Item, Integer> reqs = this.blockEntity.getRequiredItems();
+                    List<Item> itemList = new ArrayList<>(reqs.keySet());
 
-                        if (canAccept > 0) {
-                            int toMove = Math.min(canAccept, itemstack1.getCount());
+                    // Check EVERY requirement, even if it's currently scrolled off-screen
+                    for (int i = 0; i < itemList.size(); i++) {
+                        Item requiredItem = itemList.get(i);
+                        if (itemstack1.is(requiredItem)) {
+                            int totalNeeded = reqs.get(requiredItem);
+                            ItemStack currentInSlot = handler.getStackInSlot(i);
 
-                            if (targetSlot.getItem().isEmpty()) {
-                                ItemStack newStack = itemstack1.copy();
-                                newStack.setCount(toMove);
-                                targetSlot.set(newStack);
-                            } else {
-                                targetSlot.getItem().grow(toMove);
+                            if (currentInSlot.getCount() < totalNeeded) {
+                                int canAccept = totalNeeded - currentInSlot.getCount();
+                                int toMove = Math.min(canAccept, itemstack1.getCount());
+
+                                // Manually move the items into the handler
+                                ItemStack moveStack = itemstack1.split(toMove);
+                                handler.insertItem(i, moveStack, false);
+                                moved = true;
                             }
-
-                            itemstack1.shrink(toMove);
-                            targetSlot.setChanged();
-                            moved = true;
                         }
+                        if (itemstack1.isEmpty()) break;
                     }
-
-                    // If we've moved the whole stack, stop looking at slots
-                    if (itemstack1.isEmpty()) break;
                 }
-
-                // If we couldn't move anything at all, return empty to stop the loop
                 if (!moved) return ItemStack.EMPTY;
             }
 
-            // Standard cleanup logic
             if (itemstack1.isEmpty()) {
                 slot.setByPlayer(ItemStack.EMPTY);
             } else {
                 slot.setChanged();
             }
 
-            // If nothing changed during the move, something went wrong
-            if (itemstack1.getCount() == itemstack.getCount()) {
-                return ItemStack.EMPTY;
-            }
-
-            slot.onTake(playerIn, itemstack1);
+            // Final sync check
+            this.broadcastChanges();
         }
-
         return itemstack;
     }
 

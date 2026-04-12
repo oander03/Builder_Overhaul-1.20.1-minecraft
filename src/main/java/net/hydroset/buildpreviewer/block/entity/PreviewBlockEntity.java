@@ -39,7 +39,7 @@ import java.util.UUID;
 
 public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     // 27 slots like a chest
-    private final ItemStackHandler itemHandler = new ItemStackHandler(27);
+    private final ItemStackHandler itemHandler = new ItemStackHandler(108);
 
     public PreviewBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.PREVIEW_BE.get(), pos, state);

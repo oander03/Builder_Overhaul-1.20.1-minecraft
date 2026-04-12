@@ -41,6 +41,12 @@ public class ModMessages {
                 .encoder(FinalizeBuildPacket::toBytes)
                 .consumerMainThread(FinalizeBuildPacket::handle)
                 .add();
+
+        net.messageBuilder(ServerboundScrollPacket.class, id(), NetworkDirection.PLAY_TO_SERVER)
+                .decoder(ServerboundScrollPacket::new)
+                .encoder(ServerboundScrollPacket::toBytes)
+                .consumerMainThread(ServerboundScrollPacket::handle)
+                .add();
     }
 
     public static <MSG> void sendToServer(MSG message) {

@@ -57,16 +57,45 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     private static final ResourceLocation TEXTURE =
             new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/preview_block_gui.png");
 
+    // Use the 'tab_items' texture for the cleaner scroll handle
+    private static final ResourceLocation SCROLLER_TEXTURE =
+            new ResourceLocation("minecraft", "textures/gui/container/creative_inventory/tab_items.png");
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        int direction = delta > 0 ? -1 : 1;
+        menu.scrollTo(menu.scrollOffset + direction);
+
+        // Force the client to recognize the slot changes immediately
+        return true;
+    }
+
     @Override
     protected void renderBg(GuiGraphics guiGraphics, float partialTick, int mouseX, int mouseY) {
         RenderSystem.setShader(GameRenderer::getPositionTexShader);
         RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
-        RenderSystem.setShaderTexture(0, TEXTURE);
 
         int x = (width - imageWidth) / 2;
         int y = (height - imageHeight) / 2;
 
+        // 1. Draw the Main GUI Background
         guiGraphics.blit(TEXTURE, x, y, 0, 0, imageWidth, imageHeight);
+
+        // 2. Draw the Scroll Bar
+        int totalItems = menu.getBlockEntity().getRequiredItems().size();
+        if (totalItems > 27) {
+            int totalRows = (int) Math.ceil(totalItems / 9.0);
+            int maxScroll = Math.max(0, totalRows - 3);
+
+            float scrollFraction = maxScroll > 0 ? (float) menu.scrollOffset / maxScroll : 0;
+
+            int scrollBarX = this.leftPos + 174;
+            int scrollBarAreaHeight = 54 - 15;
+            int scrollBarY = this.topPos + 18 + (int)(scrollFraction * scrollBarAreaHeight);
+
+            // Vanilla grey scroller handle
+            guiGraphics.blit(SCROLLER_TEXTURE, scrollBarX, scrollBarY, 232, 0, 12, 15);
+        }
     }
 
     @Override
@@ -105,25 +134,43 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         if (cachedReqList.isEmpty()) return;
 
         // 5. Custom Requirement Rendering
-        for (int i = 0; i < cachedReqList.size(); i++) {
-            Slot slot = this.menu.slots.get(i);
-            Item reqItem = cachedReqList.get(i).getKey();
-            int totalNeeded = cachedReqList.get(i).getValue();
+        int startIndex = menu.scrollOffset * 9;
 
-            // Check what is physically in the slot right now
+        // Inside PreviewScreen.java render loop
+        for (int i = 0; i < 27; i++) {
+            Slot slot = this.menu.slots.get(i);
+
+            // Use the slot's current logical index (e.g., 9, 10, 11...)
+            int reqIndex = slot.getSlotIndex();
+
+            if (reqIndex >= cachedReqList.size()) continue;
+
+            Item reqItem = cachedReqList.get(reqIndex).getKey();
+            int totalNeeded = cachedReqList.get(reqIndex).getValue();
+
             ItemStack stackInSlot = slot.getItem();
+
+            // Check if the item in the slot matches the requirement for THIS logical index
             int currentInSlot = (stackInSlot.is(reqItem)) ? stackInSlot.getCount() : 0;
             int remaining = totalNeeded - currentInSlot;
 
             int x = this.leftPos + slot.x;
             int y = this.topPos + slot.y;
 
-            // --- DRAW ITEM LAYER ---
+            // --- DRAW LOGIC ---
             if (!stackInSlot.isEmpty()) {
-                // If user put an item in, draw the REAL item (no white number)
                 guiGraphics.renderItem(stackInSlot, x, y);
-                // Draw decorations (like durability bars) but pass empty string for the count
                 guiGraphics.renderItemDecorations(this.font, stackInSlot, x, y, "");
+            } else if (remaining > 0) {
+                guiGraphics.renderFakeItem(new ItemStack(reqItem), x, y);
+            }
+
+            // --- GREEN HIGHLIGHT LOGIC ---
+            if (!stackInSlot.isEmpty() && currentInSlot >= totalNeeded) {
+                RenderSystem.enableBlend();
+                guiGraphics.fill(x, y, x + 16, y + 16, 0x8000FF00); // Green
+                RenderSystem.disableBlend();
+
             } else if (remaining > 0) {
                 // If slot is empty and we still need items, draw the GHOST block
                 ItemStack ghostStack = new ItemStack(reqItem);
