@@ -55,8 +55,6 @@ public class BuildPreviewer
     {
         if(event.getTabKey() == CreativeModeTabs.FUNCTIONAL_BLOCKS) {
             event.accept(ModItems.BUILDACCESS);
-        }
-        if(event.getTabKey() == CreativeModeTabs.FUNCTIONAL_BLOCKS) {
             event.accept(ModBlocks.BUILDACCESS_BLOCK);
         }
     }
