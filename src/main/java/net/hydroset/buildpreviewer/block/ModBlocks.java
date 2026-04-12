@@ -2,6 +2,7 @@ package net.hydroset.buildpreviewer.block;
 
 import net.hydroset.buildpreviewer.BuildPreviewer;
 import net.hydroset.buildpreviewer.item.ModItems;
+import net.hydroset.buildpreviewer.block.PreviewBlock;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
@@ -21,7 +22,7 @@ public class ModBlocks
             DeferredRegister.create(ForgeRegistries.BLOCKS, BuildPreviewer.MOD_ID);
 
     public static final RegistryObject<Block> BUILDACCESS_BLOCK = registerBlock("builder_access_block",
-            () -> new Block(BlockBehaviour.Properties.copy(Blocks.IRON_BLOCK).sound(SoundType.AMETHYST)));
+            () -> new PreviewBlock(BlockBehaviour.Properties.copy(Blocks.IRON_BLOCK).sound(SoundType.AMETHYST)));
 
     private static <T extends Block> RegistryObject<T> registerBlock(String name, Supplier<T> block) {
         RegistryObject<T> toReturn = BLOCKS.register(name, block);
