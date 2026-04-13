@@ -1,5 +1,6 @@
 package net.hydroset.buildpreviewer;
 
+import net.hydroset.buildpreviewer.block.entity.PreviewBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -207,21 +208,6 @@ public class PreviewEvents {
     }
 
     @SubscribeEvent
-    public static void onRedstoneInteract(PlayerInteractEvent.RightClickBlock event) {
-        if (PreviewManager.isInPreview(event.getEntity().getUUID())) {
-            BlockState state = event.getLevel().getBlockState(event.getPos());
-
-            // Block interaction with common redstone triggers
-            if (state.getBlock() instanceof ButtonBlock ||
-                    state.getBlock() instanceof LeverBlock ||
-                    state.getBlock() instanceof PressurePlateBlock) {
-
-                event.setCanceled(true);
-            }
-        }
-    }
-
-    @SubscribeEvent
     public static void onPlayerAttack(AttackEntityEvent event) {
         // Blocks the initial "click" to attack any entity
         if (PreviewManager.isInPreview(event.getEntity().getUUID())) {
@@ -375,6 +361,16 @@ public class PreviewEvents {
                         return;
                     }
                 }
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onBlockInteract(PlayerInteractEvent.LeftClickBlock event) {
+        BlockPos pos = event.getPos();
+        if (event.getLevel().getBlockEntity(pos) instanceof PreviewBlockEntity be) {
+            if (!be.canPlayerAccess(event.getEntity())) {
+                event.setCanceled(true);
             }
         }
     }

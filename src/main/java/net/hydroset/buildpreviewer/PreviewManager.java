@@ -155,7 +155,7 @@ public class PreviewManager {
         restorePendingBuild(player);
 
         player.setGameMode(GameType.CREATIVE);
-        player.displayClientMessage(Component.literal("§aResuming Preview Mode"), true);
+        player.displayClientMessage(Component.literal("§dResuming Preview Mode"), true);
     }
 
     private static void restorePendingBuild(ServerPlayer player) {
@@ -221,6 +221,8 @@ public class PreviewManager {
             });
         }
 
+
+
         // 2. NOW CALCULATE COST (Now it sees the merged data)
         Map<Item, Integer> cost = calculateRequiredItems(player);
 
@@ -230,6 +232,7 @@ public class PreviewManager {
         if (anchor != null && level.getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
             be.setRequiredItems(cost, id);
         }
+
 
         // 4. HIDE THE BUILD (Rollback)
         // We loop through the ENTIRE pending build to make sure everything disappears
@@ -263,7 +266,7 @@ public class PreviewManager {
         playerAnchorPos.remove(id);
         previousGameModes.remove(id);
 
-        player.displayClientMessage(Component.literal("§bPreview hidden. Visit anchor to finalize build!"), false);
+        player.displayClientMessage(Component.literal("§ePreview hidden. Visit anchor to finalize build!"), true);
     }
 
     public static boolean isInPreview(UUID id) {

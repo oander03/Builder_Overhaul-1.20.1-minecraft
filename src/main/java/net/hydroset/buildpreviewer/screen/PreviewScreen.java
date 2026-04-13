@@ -98,6 +98,8 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         }
     }
 
+
+
     @Override
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         // Note: Inside renderLabels, (0,0) is already this.leftPos, this.topPos
@@ -139,8 +141,6 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         // Inside PreviewScreen.java render loop
         for (int i = 0; i < 27; i++) {
             Slot slot = this.menu.slots.get(i);
-
-            // Use the slot's current logical index (e.g., 9, 10, 11...)
             int reqIndex = slot.getSlotIndex();
 
             if (reqIndex >= cachedReqList.size()) continue;
@@ -148,9 +148,9 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             Item reqItem = cachedReqList.get(reqIndex).getKey();
             int totalNeeded = cachedReqList.get(reqIndex).getValue();
 
-            ItemStack stackInSlot = slot.getItem();
+// FIX: Use the tempStacks array we saved during the bypass trick!
+            ItemStack stackInSlot = tempStacks[i];
 
-            // Check if the item in the slot matches the requirement for THIS logical index
             int currentInSlot = (stackInSlot.is(reqItem)) ? stackInSlot.getCount() : 0;
             int remaining = totalNeeded - currentInSlot;
 

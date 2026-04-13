@@ -51,6 +51,8 @@ public class PreviewBlock extends Block implements EntityBlock {
         super.onRemove(state, level, pos, newState, isMoving);
     }
 
+
+
     @Override
     public float getDestroyProgress(BlockState state, Player player, BlockGetter level, BlockPos pos) {
         // Check if this specific block is currently an active anchor
@@ -126,8 +128,13 @@ public class PreviewBlock extends Block implements EntityBlock {
 
         if (!level.isClientSide()) {
             BlockEntity entity = level.getBlockEntity(pos);
-            if (entity instanceof PreviewBlockEntity) {
-                // This opens the UI/Container for the player
+            if (entity instanceof PreviewBlockEntity previewBE) {
+                // Check permissions
+                if (!previewBE.canPlayerAccess(player)) {
+                    player.displayClientMessage(Component.literal("§cThis block is currently locked by another player!"), true);
+                    return InteractionResult.FAIL;
+                }
+
                 NetworkHooks.openScreen((ServerPlayer) player, (MenuProvider) entity, pos);
             } else {
                 throw new IllegalStateException("Our Container provider is missing!");

@@ -39,10 +39,30 @@ import java.util.UUID;
 
 public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     // 27 slots like a chest
-    private final ItemStackHandler itemHandler = new ItemStackHandler(108);
+    private final ItemStackHandler itemHandler = new ItemStackHandler(108) {
+        @Override
+        public int getSlotLimit(int slot) {
+            // Allow the internal storage to go up to 1000 (or whatever your max req is)
+            return 1000;
+        }
+
+        @Override
+        protected int getStackLimit(int slot, @org.jetbrains.annotations.NotNull ItemStack stack) {
+            // This forces the handler to ignore the item's natural limit (64)
+            return getSlotLimit(slot);
+        }
+    };
 
     public PreviewBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.PREVIEW_BE.get(), pos, state);
+    }
+
+    public boolean canPlayerAccess(Player player) {
+        // If no one is currently in preview, anyone can open the block to start one
+        if (this.ownerUUID == null) return true;
+
+        // If a session is active, ONLY the owner can open it
+        return player.getUUID().equals(this.ownerUUID);
     }
 
     @Override
@@ -116,7 +136,10 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         for (Map.Entry<Item, Integer> entry : requiredItems.entrySet()) {
             if (providedItems.getOrDefault(entry.getKey(), 0) < entry.getValue()) {
                 hasEverything = false;
-                player.sendSystemMessage(Component.literal("§cMissing: " + (entry.getValue() - providedItems.getOrDefault(entry.getKey(), 0)) + "x " + entry.getKey().getDescriptionId()));
+                int missingCount = entry.getValue() - providedItems.getOrDefault(entry.getKey(), 0);
+
+                player.sendSystemMessage(Component.literal("§cMissing: " + missingCount + "x ")
+                        .append(Component.translatable(entry.getKey().getDescriptionId())));
                 break;
             }
         }
@@ -181,13 +204,31 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     }
 
     public void drops() {
-        // Replace 'itemHandler' with the name of your ItemStackHandler variable
-        SimpleContainer inventory = new SimpleContainer(itemHandler.getSlots());
-        for (int i = 0; i < itemHandler.getSlots(); i++) {
-            inventory.setItem(i, itemHandler.getStackInSlot(i));
-        }
+        if (this.level == null) return;
 
-        Containers.dropContents(this.level, this.worldPosition, inventory);
+        for (int i = 0; i < itemHandler.getSlots(); i++) {
+            ItemStack stack = itemHandler.getStackInSlot(i);
+
+            if (!stack.isEmpty()) {
+                // While we still have items in this "over-stacked" stack
+                while (stack.getCount() > 0) {
+                    // Determine how much to drop in this specific pile (max 64)
+                    int dropCount = Math.min(stack.getCount(), stack.getMaxStackSize());
+
+                    // Create a copy to drop so we don't mutate the original incorrectly
+                    ItemStack dropStack = stack.copy();
+                    dropStack.setCount(dropCount);
+
+                    // Drop the legal-sized stack at the block's position
+                    Containers.dropItemStack(this.level, this.worldPosition.getX(),
+                            this.worldPosition.getY(), this.worldPosition.getZ(),
+                            dropStack);
+
+                    // Reduce the original stack by what we just dropped
+                    stack.shrink(dropCount);
+                }
+            }
+        }
     }
 
     @Override

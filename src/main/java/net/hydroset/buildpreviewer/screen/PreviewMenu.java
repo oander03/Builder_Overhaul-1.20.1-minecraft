@@ -32,22 +32,19 @@ public class PreviewMenu extends AbstractContainerMenu {
         int maxScroll = Math.max(0, totalRows - 3);
         this.scrollOffset = Math.max(0, Math.min(newOffset, maxScroll));
 
-        // Force the slots to point to new data indices
+        // 1. Update the slots to point to the new part of the inventory
         for (int i = 0; i < 27; i++) {
             if (this.slots.get(i) instanceof ScrollableSlot scrollSlot) {
                 scrollSlot.setIndex((scrollOffset * 9) + i);
             }
         }
 
+        // 2. CRITICAL: Force the menu to refresh its knowledge of what is in the slots
         if (this.blockEntity.getLevel().isClientSide) {
-            // TELL THE SERVER: "Hey, I scrolled!"
             ModMessages.sendToServer(new ServerboundScrollPacket(this.scrollOffset));
         } else {
-            // THE SERVER'S TURN:
-            // 1. Tell the server-side slots to update too
-            // 2. Force a full inventory sync back to the client
+            // On server, broadcast changes so the client receives the updated item stacks for the new indices
             this.broadcastChanges();
-            this.sendAllDataToRemote();
         }
     }
 
@@ -122,6 +119,11 @@ public class PreviewMenu extends AbstractContainerMenu {
 
     @Override
     public ItemStack quickMoveStack(Player playerIn, int index) {
+        // 1. ADDED PREVIEW CHECK: Block shift-clicking while in preview mode
+        if (net.hydroset.buildpreviewer.PreviewManager.isInPreview(playerIn.getUUID())) {
+            return ItemStack.EMPTY;
+        }
+
         ItemStack itemstack = ItemStack.EMPTY;
         Slot slot = this.slots.get(index);
 
@@ -129,13 +131,13 @@ public class PreviewMenu extends AbstractContainerMenu {
             ItemStack itemstack1 = slot.getItem();
             itemstack = itemstack1.copy();
 
-            // 1. FROM Screen Slots (0-26) TO Player Inventory (27+)
+            // FROM Screen Slots (0-26) TO Player Inventory (27+)
             if (index < 27) {
                 if (!this.moveItemStackTo(itemstack1, 27, this.slots.size(), true)) {
                     return ItemStack.EMPTY;
                 }
             }
-            // 2. FROM Player Inventory TO Block Entity (The fix is here)
+            // FROM Player Inventory TO Block Entity
             else {
                 boolean moved = false;
                 var handler = this.blockEntity.getCapability(ForgeCapabilities.ITEM_HANDLER).orElse(null);
@@ -144,7 +146,6 @@ public class PreviewMenu extends AbstractContainerMenu {
                     Map<Item, Integer> reqs = this.blockEntity.getRequiredItems();
                     List<Item> itemList = new ArrayList<>(reqs.keySet());
 
-                    // Check EVERY requirement, even if it's currently scrolled off-screen
                     for (int i = 0; i < itemList.size(); i++) {
                         Item requiredItem = itemList.get(i);
                         if (itemstack1.is(requiredItem)) {
@@ -155,7 +156,6 @@ public class PreviewMenu extends AbstractContainerMenu {
                                 int canAccept = totalNeeded - currentInSlot.getCount();
                                 int toMove = Math.min(canAccept, itemstack1.getCount());
 
-                                // Manually move the items into the handler
                                 ItemStack moveStack = itemstack1.split(toMove);
                                 handler.insertItem(i, moveStack, false);
                                 moved = true;
@@ -173,7 +173,6 @@ public class PreviewMenu extends AbstractContainerMenu {
                 slot.setChanged();
             }
 
-            // Final sync check
             this.broadcastChanges();
         }
         return itemstack;
