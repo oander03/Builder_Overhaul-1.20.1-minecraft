@@ -171,18 +171,22 @@ public class PreviewManager {
         UUID id = player.getUUID();
         BlockPos anchor = playerAnchorPos.get(id);
 
+        // Everything must stay inside this IF block so 'be' and 'level' are known
         if (anchor != null && player.level().getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
-            // Get the data directly from the BE's NBT-loaded map!
             Map<BlockPos, BuildSnapshot> buildData = be.getBuildSnapshots();
 
             if (!buildData.isEmpty()) {
                 Level level = player.level();
+
                 buildData.forEach((pos, snapshot) -> {
-                    level.setBlock(pos, snapshot.buildState, 3 | 16);
+                    // We use Flag 2 here to prevent neighbor updates (breaking torches/blocks)
+                    level.setBlock(pos, snapshot.buildState, 2);
                 });
+
                 player.displayClientMessage(Component.literal("§aRestored preview from saved data!"), true);
             }
         }
+        // Do not put buildData.forEach here! It is outside the brackets, so the variables are 'red'.
     }
 
     public static void restoreInventory(ServerPlayer player) {
@@ -244,11 +248,10 @@ public class PreviewManager {
             level.sendBlockUpdated(anchor, level.getBlockState(anchor), level.getBlockState(anchor), 3);
         }
 
-
-        // 4. HIDE THE BUILD (Rollback)
         if (complexSnapshot != null) {
             complexSnapshot.forEach((pos, snapshot) -> {
-                level.setBlock(pos, snapshot.originalState, 3 | 16);
+                // Change this line:
+                level.setBlock(pos, snapshot.originalState, 2);
             });
         }
 

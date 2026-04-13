@@ -44,72 +44,49 @@ import java.util.UUID;
 public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
     private Map<BlockPos, PreviewManager.BuildSnapshot> buildSnapshots = new HashMap<>();
+
     private final ItemStackHandler itemHandler = new ItemStackHandler(108) {
-        @Override
-        public @NotNull ItemStack insertItem(int slot, @NotNull ItemStack stack, boolean simulate) {
-            // 1. Whitelist Check
-            if (requiredItems == null || !requiredItems.containsKey(stack.getItem())) {
-                return stack;
-            }
-
-            // 2. Global Quota Check
-            int neededTotal = requiredItems.getOrDefault(stack.getItem(), 0);
-            int currentCount = 0;
-            for (int i = 0; i < getSlots(); i++) {
-                ItemStack inSlot = getStackInSlot(i);
-                if (inSlot.is(stack.getItem())) {
-                    currentCount += inSlot.getCount();
-                }
-            }
-
-            if (currentCount >= neededTotal) {
-                return stack;
-            }
-
-            // 3. Smart Insertion: Ignore the 'slot' parameter passed by the hopper.
-            // We will find the correct slot ourselves.
-            int roomInQuota = neededTotal - currentCount;
-            ItemStack toInsert = stack.copy();
-            if (toInsert.getCount() > roomInQuota) {
-                toInsert.setCount(roomInQuota);
-            }
-
-            ItemStack remainder = stack.copy();
-            int amountToProcess = toInsert.getCount();
-
-            // Loop through all 108 slots to find a matching stack or empty space
-            for (int i = 0; i < getSlots(); i++) {
-                ItemStack stackInSlot = getStackInSlot(i);
-
-                // Only insert if the slot is empty OR matches our item type
-                if (stackInSlot.isEmpty() || stackInSlot.is(stack.getItem())) {
-                    int countBefore = toInsert.getCount();
-                    toInsert = super.insertItem(i, toInsert, simulate);
-                    int accepted = countBefore - toInsert.getCount();
-
-                    remainder.shrink(accepted);
-
-                    // If we've inserted everything we were allowed to, stop searching slots
-                    if (toInsert.isEmpty()) break;
-                }
-            }
-
-            return remainder;
-        }
 
         @Override
-        public int getSlotLimit(int slot) { return 1000; }
 
-        @Override
-        protected int getStackLimit(int slot, @NotNull ItemStack stack) { return 1000; }
-
-        @Override
         protected void onContentsChanged(int slot) {
+
+// This tells the game to save the block to the hard drive when items change
+
             setChanged();
-            if (level != null && !level.isClientSide) {
+
+            if (level != null) {
+
                 level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+
             }
+
         }
+
+
+
+        @Override
+
+        public int getSlotLimit(int slot) {
+
+// Allow the internal storage to go up to 1000 (or whatever your max req is)
+
+            return 1000;
+
+        }
+
+
+
+        @Override
+
+        protected int getStackLimit(int slot, @org.jetbrains.annotations.NotNull ItemStack stack) {
+
+// This forces the handler to ignore the item's natural limit (64)
+
+            return getSlotLimit(slot);
+
+        }
+
     };
 
 
