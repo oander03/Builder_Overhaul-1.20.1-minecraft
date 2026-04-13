@@ -97,28 +97,18 @@ public class PreviewBlock extends Block implements EntityBlock {
             }
         }
     }
-    public static void commitBuild(ServerPlayer player) {
-        UUID id = player.getUUID();
-
-        // 1. Get the complex snapshot (Original vs Build)
-        Map<BlockPos, PreviewManager.BuildSnapshot> snapshotMap = PreviewManager.pendingCommit.get(id);
-
-        if (snapshotMap != null) {
+    // Notice we added the 'snapshots' parameter here
+    public static void commitBuild(ServerPlayer player, Map<BlockPos, PreviewManager.BuildSnapshot> snapshots) {
+        if (snapshots != null && !snapshots.isEmpty()) {
             Level level = player.level();
 
-            // 2. PHYSICALLY PLACE THE BLOCKS BACK
-            // Since the player is in Survival/at the Anchor, we must force the blocks
-            // from the snapshot into the actual world.
-            snapshotMap.forEach((pos, snapshot) -> {
-                level.setBlock(pos, snapshot.buildState, 3 | 16);
+            snapshots.forEach((pos, snapshot) -> {
+                // CHANGE: Use Flag 3 (Constants.BlockFlags.DEFAULT)
+                // This ensures the block is placed firmly and the neighbors are notified correctly
+                level.setBlock(pos, snapshot.buildState, 3);
             });
 
-            // 3. NOW delete the backup
-            PreviewManager.pendingCommit.remove(id);
-
-            player.displayClientMessage(Component.literal("§aBuild finalized! Blocks placed permanently."), false);
-        } else {
-            player.displayClientMessage(Component.literal("§cError: No build data found to place!"), false);
+            player.displayClientMessage(Component.literal("§aBuild finalized!"), false);
         }
     }
 

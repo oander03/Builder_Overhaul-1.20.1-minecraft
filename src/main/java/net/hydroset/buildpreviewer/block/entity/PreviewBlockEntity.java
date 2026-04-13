@@ -6,7 +6,10 @@ import net.hydroset.buildpreviewer.block.entity.ModBlockEntities;
 import net.hydroset.buildpreviewer.screen.PreviewMenu;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtUtils;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
@@ -30,6 +33,7 @@ import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemStackHandler;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.registries.ForgeRegistries;
+import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
 import java.util.HashMap;
@@ -38,20 +42,76 @@ import java.util.Map;
 import java.util.UUID;
 
 public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
-    // 27 slots like a chest
+
+    private Map<BlockPos, PreviewManager.BuildSnapshot> buildSnapshots = new HashMap<>();
     private final ItemStackHandler itemHandler = new ItemStackHandler(108) {
         @Override
-        public int getSlotLimit(int slot) {
-            // Allow the internal storage to go up to 1000 (or whatever your max req is)
-            return 1000;
+        public @NotNull ItemStack insertItem(int slot, @NotNull ItemStack stack, boolean simulate) {
+            // 1. Whitelist Check
+            if (requiredItems == null || !requiredItems.containsKey(stack.getItem())) {
+                return stack;
+            }
+
+            // 2. Global Quota Check
+            int neededTotal = requiredItems.getOrDefault(stack.getItem(), 0);
+            int currentCount = 0;
+            for (int i = 0; i < getSlots(); i++) {
+                ItemStack inSlot = getStackInSlot(i);
+                if (inSlot.is(stack.getItem())) {
+                    currentCount += inSlot.getCount();
+                }
+            }
+
+            if (currentCount >= neededTotal) {
+                return stack;
+            }
+
+            // 3. Smart Insertion: Ignore the 'slot' parameter passed by the hopper.
+            // We will find the correct slot ourselves.
+            int roomInQuota = neededTotal - currentCount;
+            ItemStack toInsert = stack.copy();
+            if (toInsert.getCount() > roomInQuota) {
+                toInsert.setCount(roomInQuota);
+            }
+
+            ItemStack remainder = stack.copy();
+            int amountToProcess = toInsert.getCount();
+
+            // Loop through all 108 slots to find a matching stack or empty space
+            for (int i = 0; i < getSlots(); i++) {
+                ItemStack stackInSlot = getStackInSlot(i);
+
+                // Only insert if the slot is empty OR matches our item type
+                if (stackInSlot.isEmpty() || stackInSlot.is(stack.getItem())) {
+                    int countBefore = toInsert.getCount();
+                    toInsert = super.insertItem(i, toInsert, simulate);
+                    int accepted = countBefore - toInsert.getCount();
+
+                    remainder.shrink(accepted);
+
+                    // If we've inserted everything we were allowed to, stop searching slots
+                    if (toInsert.isEmpty()) break;
+                }
+            }
+
+            return remainder;
         }
 
         @Override
-        protected int getStackLimit(int slot, @org.jetbrains.annotations.NotNull ItemStack stack) {
-            // This forces the handler to ignore the item's natural limit (64)
-            return getSlotLimit(slot);
+        public int getSlotLimit(int slot) { return 1000; }
+
+        @Override
+        protected int getStackLimit(int slot, @NotNull ItemStack stack) { return 1000; }
+
+        @Override
+        protected void onContentsChanged(int slot) {
+            setChanged();
+            if (level != null && !level.isClientSide) {
+                level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+            }
         }
     };
+
 
     public PreviewBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.PREVIEW_BE.get(), pos, state);
@@ -64,6 +124,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         // If a session is active, ONLY the owner can open it
         return player.getUUID().equals(this.ownerUUID);
     }
+
 
     @Override
     public Component getDisplayName() {
@@ -78,26 +139,45 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         return new PreviewMenu(containerId, inventory, this);
     }
 
-    // 1. Send the data to the client when they arrive
+    // This handles the packet sent by level.sendBlockUpdated
     @Override
-    public CompoundTag getUpdateTag() {
-        // This sends data when the chunk loads or the player joins
-        return saveWithoutMetadata();
+    public Packet<ClientGamePacketListener> getUpdatePacket() {
+        return ClientboundBlockEntityDataPacket.create(this);
     }
 
+    // This prepares the data to be sent to the client
+    @Override
+    public @NotNull CompoundTag getUpdateTag() {
+        CompoundTag nbt = super.getUpdateTag();
+        saveAdditional(nbt); // This ensures the Inventory and RequiredItems are included
+        return nbt;
+    }
+
+    @Override
+    public void invalidateCaps() {
+        super.invalidateCaps();
+        lazyItemHandler.invalidate();
+        hopperBlocker.invalidate();
+    }
+
+    // This handles the data when it arrives at the client
+    @Override
+    public void onDataPacket(net.minecraft.network.Connection net, ClientboundBlockEntityDataPacket pkt) {
+        CompoundTag tag = pkt.getTag();
+        if (tag != null) {
+            load(tag);
+            // Force the UI to refresh if it's open
+            if (level != null && level.isClientSide) {
+                level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+            }
+        }
+    }
     @Override
     public void handleUpdateTag(CompoundTag tag) {
         // This receives that data on the Client side
         load(tag);
     }
 
-    // 2. Packet sync (Standard for 1.20.1)
-    @Nullable
-    @Override
-    public Packet<ClientGamePacketListener> getUpdatePacket() {
-        // This creates the actual packet that travels over the network
-        return ClientboundBlockEntityDataPacket.create(this);
-    }
 
 
     // Inside PreviewBlockEntity.java
@@ -114,8 +194,8 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     public void checkRequirementsAndCommit(ServerPlayer player) {
         UUID id = player.getUUID();
 
-        // Check if there is a build record at all (even if it's just breaking blocks)
-        boolean hasPendingBuild = PreviewManager.pendingCommit.containsKey(id);
+        // CHANGE: Check this.buildSnapshots instead of PreviewManager.pendingCommit
+        boolean hasPendingBuild = !this.buildSnapshots.isEmpty();
 
         if (!hasPendingBuild) {
             player.sendSystemMessage(Component.literal("§cNo active build to finalize!"));
@@ -146,25 +226,26 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
         // 4. If the check passed, consume items and build!
         if (hasEverything) {
-// 1. Consume what is actually needed for the build
             consumeRequiredItems();
-
-            // 2. Eject anything LEFT OVER back to the player
             ejectItemsToPlayer(player);
 
-            // 3. Commit the actual blocks to the world
-            PreviewBlock.commitBuild(player);
+            // CRITICAL: Pass 'this.buildSnapshots' here!
+            PreviewBlock.commitBuild(player, this.buildSnapshots);
 
-            // 4. Clear the manager's memory
+            // 4. Clear the manager's memory (if they happened to go into preview)
             PreviewManager.pendingCommit.remove(id);
 
-            // 5. Clear this block's memory and SYNC to client
+            // 5. Clear this block's memory
+            this.buildSnapshots.clear();
             this.requiredItems.clear();
+
+            // Clear the physical slots
+            for (int i = 0; i < itemHandler.getSlots(); i++) {
+                itemHandler.setStackInSlot(i, ItemStack.EMPTY);
+            }
+
             this.setChanged();
-
-            // This line forces the server to tell the client "Hey, my data changed!"
             level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
-
             player.closeContainer();
         }
     }
@@ -193,14 +274,16 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
             int toTake = entry.getValue();
             for (int i = 0; i < itemHandler.getSlots(); i++) {
                 ItemStack stack = itemHandler.getStackInSlot(i);
-                if (stack.getItem() == entry.getKey()) {
+                if (stack.is(entry.getKey())) {
                     int shrinkBy = Math.min(stack.getCount(), toTake);
-                    stack.shrink(shrinkBy);
+                    // Use itemHandler.extractItem to ensure the handler knows it changed
+                    itemHandler.extractItem(i, shrinkBy, false);
                     toTake -= shrinkBy;
                 }
                 if (toTake <= 0) break;
             }
         }
+        this.setChanged();
     }
 
     public void drops() {
@@ -231,10 +314,26 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         }
     }
 
+    public void setBuildData(Map<BlockPos, PreviewManager.BuildSnapshot> snapshots, Map<Item, Integer> cost, UUID owner) {
+        this.buildSnapshots = new HashMap<>(snapshots); // Removed the extra underscores
+        this.requiredItems = new HashMap<>(cost);
+        this.ownerUUID = owner;
+        this.setChanged();
+    }
+
     @Override
     protected void saveAdditional(CompoundTag tag) {
         super.saveAdditional(tag);
 
+        ListTag snapshotList = new ListTag();
+        for (Map.Entry<BlockPos, PreviewManager.BuildSnapshot> entry : buildSnapshots.entrySet()) {
+            CompoundTag entryTag = new CompoundTag();
+            entryTag.putLong("pos", entry.getKey().asLong());
+            entryTag.put("original", NbtUtils.writeBlockState(entry.getValue().originalState));
+            entryTag.put("build", NbtUtils.writeBlockState(entry.getValue().buildState));
+            snapshotList.add(entryTag);
+        }
+        tag.put("BuildSnapshots", snapshotList);
         // Save the required items map
         CompoundTag itemsTag = new CompoundTag();
         int i = 0;
@@ -249,6 +348,8 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         tag.put("RequiredItems", itemsTag);
         tag.putInt("RequiredItemsSize", i);
 
+        tag.put("Inventory", itemHandler.serializeNBT());
+
         if (ownerUUID != null) {
             tag.putUUID("Owner", ownerUUID);
         }
@@ -258,18 +359,45 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     public void load(CompoundTag tag) {
         super.load(tag);
 
+        // Clear existing data before loading
+        this.buildSnapshots.clear();
         this.requiredItems.clear();
+
+        // IMPORTANT: Use BuiltInRegistries if level is null (happens during world load)
+        var lookup = net.minecraft.core.registries.BuiltInRegistries.BLOCK.asLookup();
+
+        if (tag.contains("BuildSnapshots")) {
+            ListTag snapshotList = tag.getList("BuildSnapshots", 10);
+            for (int i = 0; i < snapshotList.size(); i++) {
+                CompoundTag entryTag = snapshotList.getCompound(i);
+                BlockPos pos = BlockPos.of(entryTag.getLong("pos"));
+
+                // Read the NBT tags back into BlockState objects
+                BlockState original = NbtUtils.readBlockState(lookup, entryTag.getCompound("original"));
+                BlockState build = NbtUtils.readBlockState(lookup, entryTag.getCompound("build"));
+
+                this.buildSnapshots.put(pos, new PreviewManager.BuildSnapshot(original, build));
+            }
+        }
+
+        // Load your Required Items
         if (tag.contains("RequiredItems")) {
             CompoundTag itemsTag = tag.getCompound("RequiredItems");
             int size = tag.getInt("RequiredItemsSize");
             for (int i = 0; i < size; i++) {
                 CompoundTag entryTag = itemsTag.getCompound("item_" + i);
-                Item item = ForgeRegistries.ITEMS.getValue(new ResourceLocation(entryTag.getString("item")));
+                ResourceLocation itemID = new ResourceLocation(entryTag.getString("item"));
+                Item item = ForgeRegistries.ITEMS.getValue(itemID);
                 int count = entryTag.getInt("count");
-                if (item != Items.AIR) {
+                if (item != null && item != Items.AIR) {
                     this.requiredItems.put(item, count);
                 }
             }
+        }
+
+        // ADD THIS LINE: This puts the items back into the slots
+        if (tag.contains("Inventory")) {
+            itemHandler.deserializeNBT(tag.getCompound("Inventory"));
         }
 
         if (tag.hasUUID("Owner")) {
@@ -277,15 +405,41 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         }
     }
 
+    public Map<BlockPos, PreviewManager.BuildSnapshot> getBuildSnapshots() {
+        return this.buildSnapshots;
+    }
+
     private final LazyOptional<IItemHandler> lazyItemHandler = LazyOptional.of(() -> itemHandler);
 
+    private final LazyOptional<IItemHandler> hopperBlocker = LazyOptional.of(() -> new IItemHandler() {
+        @Override public int getSlots() { return itemHandler.getSlots(); }
+        @Override public @NotNull ItemStack getStackInSlot(int slot) { return itemHandler.getStackInSlot(slot); }
+
+        // Return the full stack back to the hopper so it doesn't "eat" the item
+        @Override public @NotNull ItemStack insertItem(int slot, @NotNull ItemStack stack, boolean simulate) {
+            return stack;
+        }
+
+        // Prevent hoppers/pipes from sucking items out
+        @Override public @NotNull ItemStack extractItem(int slot, int amount, boolean simulate) {
+            return ItemStack.EMPTY;
+        }
+
+        @Override public int getSlotLimit(int slot) { return itemHandler.getSlotLimit(slot); }
+        @Override public boolean isItemValid(int slot, @NotNull ItemStack stack) { return false; }
+    });
+
     @Override
-    public <T> LazyOptional<T> getCapability(Capability<T> cap, @Nullable Direction side) {
+    public <T> @NotNull LazyOptional<T> getCapability(@NotNull Capability<T> cap, @Nullable Direction side) {
         if (cap == ForgeCapabilities.ITEM_HANDLER) {
-            return lazyItemHandler.cast();
+            // side == null means internal access (Player/GUI)
+            if (side == null) {
+                return lazyItemHandler.cast();
+            }
+            // side != null means external access (Hopper/Pipe/Cables)
+            return hopperBlocker.cast();
         }
         return super.getCapability(cap, side);
     }
-
     // You'll also need to override saveAdditional and load for NBT saving
 }

@@ -37,6 +37,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import static net.hydroset.buildpreviewer.PreviewManager.findSafeTeleportPos;
+
 @Mod.EventBusSubscriber(modid = BuildPreviewer.MOD_ID)
 public class PreviewEvents {
 
@@ -124,12 +126,14 @@ public class PreviewEvents {
                 // Cancel ALL damage in preview mode (Void, /kill, etc.)
                 event.setCanceled(true);
 
-                // If they are falling into the void, snap them back to the anchor
+                // Inside PreviewEvents.onPreviewDamage
                 if (player.getY() < player.level().getMinBuildHeight()) {
                     BlockPos anchor = PreviewManager.getAnchorPos(player.getUUID());
                     if (anchor != null) {
-                        player.teleportTo(anchor.getX() + 0.5, anchor.getY() + 1.0, anchor.getZ() + 0.5);
-                        player.sendSystemMessage(Component.literal("§cYou fell into the void! Teleported to anchor."));
+                        // Use the same logic here!
+                        BlockPos safePos = findSafeTeleportPos(player.level(), anchor);
+                        player.teleportTo(safePos.getX() + 0.5, safePos.getY(), safePos.getZ() + 0.5);
+                        player.sendSystemMessage(Component.literal("§cYou fell into the void! Teleported to safety."));
                     }
                 }
             }

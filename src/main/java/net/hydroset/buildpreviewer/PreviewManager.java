@@ -142,16 +142,25 @@ public class PreviewManager {
         UUID id = player.getUUID();
         Level level = player.level();
 
-        // NEW SAFETY: Eject items BEFORE taking the inventory snapshot
+        // 1. Eject items as usual
         if (level.getBlockEntity(pos) instanceof PreviewBlockEntity be) {
             be.ejectItemsToPlayer(player);
+
+            // --- NEW SYNC LOGIC ---
+            // If the Block Entity has a saved build, "teach" the Manager about it again
+            Map<BlockPos, BuildSnapshot> savedBuild = be.getBuildSnapshots();
+            if (savedBuild != null && !savedBuild.isEmpty()) {
+                // Repopulate the manager's static memory from the BE's NBT data
+                pendingCommit.put(id, new HashMap<>(savedBuild));
+            }
+            // ----------------------
         }
 
         startInventoryPreview(player);
         previousGameModes.put(id, player.gameMode.getGameModeForPlayer());
         playerAnchorPos.put(id, pos);
 
-        // NEW: If they have a pending build, bring the blocks back!
+        // This will now work because 'pendingCommit' was just filled above!
         restorePendingBuild(player);
 
         player.setGameMode(GameType.CREATIVE);
@@ -160,17 +169,19 @@ public class PreviewManager {
 
     private static void restorePendingBuild(ServerPlayer player) {
         UUID id = player.getUUID();
-        if (pendingCommit.containsKey(id)) {
-            Level level = player.level();
-            // FIX: Change BlockState to BuildSnapshot here
-            Map<BlockPos, BuildSnapshot> backup = pendingCommit.get(id);
+        BlockPos anchor = playerAnchorPos.get(id);
 
-            backup.forEach((pos, snapshot) -> {
-                // Restore the "Build" state (the blocks they placed)
-                level.setBlock(pos, snapshot.buildState, 3 | 16);
-            });
+        if (anchor != null && player.level().getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+            // Get the data directly from the BE's NBT-loaded map!
+            Map<BlockPos, BuildSnapshot> buildData = be.getBuildSnapshots();
 
-            player.displayClientMessage(Component.literal("§aRestored your previous build!"), true);
+            if (!buildData.isEmpty()) {
+                Level level = player.level();
+                buildData.forEach((pos, snapshot) -> {
+                    level.setBlock(pos, snapshot.buildState, 3 | 16);
+                });
+                player.displayClientMessage(Component.literal("§aRestored preview from saved data!"), true);
+            }
         }
     }
 
@@ -204,61 +215,56 @@ public class PreviewManager {
     public static void exitPreview(ServerPlayer player) {
         UUID id = player.getUUID();
         Level level = player.level();
+        BlockPos anchor = playerAnchorPos.get(id);
 
-        // 1. MERGE SESSION INTO PENDING COMMIT FIRST
+        // 1. MERGE SESSION INTO PENDING COMMIT
         Map<BlockPos, BlockState> currentSession = sessionChanges.get(id);
-        if (currentSession != null) {
-            Map<BlockPos, BuildSnapshot> complexSnapshot = pendingCommit.computeIfAbsent(id, k -> new HashMap<>());
+        Map<BlockPos, BuildSnapshot> complexSnapshot = pendingCommit.computeIfAbsent(id, k -> new HashMap<>());
 
+        if (currentSession != null) {
             currentSession.forEach((pos, originalState) -> {
                 if (!complexSnapshot.containsKey(pos)) {
                     complexSnapshot.put(pos, new BuildSnapshot(originalState, level.getBlockState(pos)));
                 } else {
                     BuildSnapshot existing = complexSnapshot.get(pos);
-                    // Keep the very first original state, but update the new build state
                     complexSnapshot.put(pos, new BuildSnapshot(existing.originalState, level.getBlockState(pos)));
                 }
             });
         }
 
-
-
-        // 2. NOW CALCULATE COST (Now it sees the merged data)
+        // 2. CALCULATE COST
         Map<Item, Integer> cost = calculateRequiredItems(player);
 
-        // 3. SEND DATA TO ANCHOR
-        // This ensures the Block Entity knows what items are needed for the UI
-        BlockPos anchor = playerAnchorPos.get(id);
+        // 3. SEND ALL DATA TO ANCHOR (Merged into one block for clarity)
         if (anchor != null && level.getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+            // This is the line that was red—it now sees 'complexSnapshot' defined above
+            be.setBuildData(complexSnapshot, cost, id);
             be.setRequiredItems(cost, id);
+            // Force the sync to client
+            level.sendBlockUpdated(anchor, level.getBlockState(anchor), level.getBlockState(anchor), 3);
         }
 
 
         // 4. HIDE THE BUILD (Rollback)
-        // We loop through the ENTIRE pending build to make sure everything disappears
-        Map<BlockPos, BuildSnapshot> totalBuild = pendingCommit.get(id);
-        if (totalBuild != null) {
-            totalBuild.forEach((pos, snapshot) -> {
+        if (complexSnapshot != null) {
+            complexSnapshot.forEach((pos, snapshot) -> {
                 level.setBlock(pos, snapshot.originalState, 3 | 16);
             });
         }
 
-        // Inside PreviewManager.exitPreview
-        if (anchor != null && level.getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
-            be.setRequiredItems(cost, id);
 
-            // ADD THIS LINE: This forces the server to sync to the client RIGHT NOW
-            level.sendBlockUpdated(anchor, level.getBlockState(anchor), level.getBlockState(anchor), 3);
-        }
 
         // 5. RESTORE PLAYER STATE
         player.removeAllEffects();
         restoreInventory(player);
         player.setGameMode(previousGameModes.getOrDefault(id, GameType.SURVIVAL));
 
-        // 6. TELEPORT BACK TO ANCHOR
+        // Inside exitPreview
         if (anchor != null) {
-            player.teleportTo(anchor.getX() + 0.5, anchor.getY() + 1.0, anchor.getZ() + 0.5);
+            BlockPos safePos = findSafeTeleportPos(level, anchor);
+            // x + 0.5 and z + 0.5 centers you on the block
+            // y gives you the floor of the air block
+            player.teleportTo(safePos.getX() + 0.5, safePos.getY(), safePos.getZ() + 0.5);
         }
 
         // 7. CLEANUP ACTIVE SESSION DATA (But keep pendingCommit!)
@@ -271,6 +277,37 @@ public class PreviewManager {
 
     public static boolean isInPreview(UUID id) {
         return playerAnchorPos.containsKey(id);
+    }
+
+    public static BlockPos findSafeTeleportPos(Level level, BlockPos startPos) {
+        // 1. First, check the column DIRECTLY above the block (x=0, z=0)
+        // This loop checks y=1 (right on top), then y=2, then y=3
+        for (int y = 1; y <= 4; y++) {
+            BlockPos centerCheck = startPos.above(y);
+            if (level.getBlockState(centerCheck).isAir() &&
+                    level.getBlockState(centerCheck.above()).isAir()) {
+                return centerCheck;
+            }
+        }
+
+        // 2. If the center column is blocked, search the surrounding 3x3 area
+        for (int y = 1; y <= 3; y++) {
+            for (int x = -1; x <= 1; x++) {
+                for (int z = -1; z <= 1; z++) {
+                    // Skip the center because we already checked it above
+                    if (x == 0 && z == 0) continue;
+
+                    BlockPos offsetPos = startPos.offset(x, y, z);
+                    if (level.getBlockState(offsetPos).isAir() &&
+                            level.getBlockState(offsetPos.above()).isAir()) {
+                        return offsetPos;
+                    }
+                }
+            }
+        }
+
+        // 3. Absolute fallback: just one block up
+        return startPos.above();
     }
 
     public static void updateAnchorCost(ServerPlayer player, Map<Item, Integer> cost) {
