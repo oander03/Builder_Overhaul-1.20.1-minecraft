@@ -19,10 +19,12 @@ import java.util.*;
 
 public class PreviewManager {
 
-    private static final Map<UUID, GameType> previousGameModes = new HashMap<>();
-    // Maps Player UUID to the specific BlockPos they started the preview from
-    private static final Map<UUID, BlockPos> playerAnchorPos = new HashMap<>();
     private static final Map<UUID, ListTag> savedInventories = new HashMap<>();
+
+    private static final Map<UUID, GameType> previousGameModes = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<UUID, BlockPos> playerAnchorPos = new java.util.concurrent.ConcurrentHashMap<>();
+    public static final Map<UUID, Map<BlockPos, BuildSnapshot>> pendingCommit = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<UUID, Map<BlockPos, BlockState>> sessionChanges = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static class BuildSnapshot {
         public final BlockState originalState;
@@ -35,38 +37,23 @@ public class PreviewManager {
     }
 
 
-
-    public static final Map<UUID, Map<BlockPos, BuildSnapshot>> pendingCommit = new HashMap<>();
-    // Stores: Player UUID -> (Map of Location -> Original BlockState)
-    private static final Map<UUID, Map<BlockPos, BlockState>> sessionChanges = new HashMap<>();
-
     public static void recordChange(UUID playerId, BlockPos pos, BlockState currentStateAtPos) {
         if (isInPreview(playerId)) {
             Map<BlockPos, BlockState> changes = sessionChanges.computeIfAbsent(playerId, k -> new HashMap<>());
             Map<BlockPos, BuildSnapshot> totalBuild = pendingCommit.get(playerId);
 
-            // We only record if we haven't tracked this position in the CURRENT session
             if (!changes.containsKey(pos)) {
-
-            /* CRITICAL FIX:
-               If this block was already part of a previous preview session (stored in pendingCommit),
-               we must use the REAL original state from that snapshot.
-               Otherwise, we'd accidentally treat a "preview block" as a "real world block".
-            */
                 if (totalBuild != null && totalBuild.containsKey(pos)) {
-                    // Use the original state from the existing snapshot
                     changes.put(pos, totalBuild.get(pos).originalState);
                 } else {
-                    // This is a brand new change to a block the mod hasn't touched yet
                     changes.put(pos, currentStateAtPos);
                 }
             }
         } else {
-            // ... (your existing code for non-preview cleanup)
+            // If anyone breaks a block in the world in Survival,
+            // no preview should ever try to roll it back to a previous state.
             pendingCommit.forEach((uuid, map) -> {
-                if (map.containsKey(pos)) {
-                    map.remove(pos);
-                }
+                map.remove(pos);
             });
         }
     }
@@ -246,15 +233,20 @@ public class PreviewManager {
         Map<Item, Integer> cost = calculateRequiredItems(player);
         if (anchor != null && level.getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
             be.setBuildData(complexSnapshot, cost, id);
+            be.setChanged();
             level.sendBlockUpdated(anchor, level.getBlockState(anchor), level.getBlockState(anchor), 3);
         }
 
-        // 3. PHYSICAL WORLD ROLLBACK
-        // We only need to iterate complexSnapshot. It now contains EVERYTHING the mod has ever touched.
         complexSnapshot.forEach((pos, snapshot) -> {
-            level.setBlock(pos, snapshot.originalState, 2 | 16);
+            if (level.hasChunkAt(pos)) {
+                BlockState worldNow = level.getBlockState(pos);
+                // Only rollback if the world state is NOT what we're trying to roll back to.
+                // This prevents "re-creating" blocks that were already removed in survival.
+                if (!worldNow.equals(snapshot.originalState)) {
+                    level.setBlock(pos, snapshot.originalState, 2 | 16);
+                }
+            }
         });
-
         // 4. RESTORE PLAYER
         player.removeAllEffects();
         restoreInventory(player);
