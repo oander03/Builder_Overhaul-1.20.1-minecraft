@@ -40,17 +40,29 @@ public class PreviewManager {
     // Stores: Player UUID -> (Map of Location -> Original BlockState)
     private static final Map<UUID, Map<BlockPos, BlockState>> sessionChanges = new HashMap<>();
 
-    public static void recordChange(UUID playerId, BlockPos pos, BlockState originalState) {
+    public static void recordChange(UUID playerId, BlockPos pos, BlockState currentStateAtPos) {
         if (isInPreview(playerId)) {
             Map<BlockPos, BlockState> changes = sessionChanges.computeIfAbsent(playerId, k -> new HashMap<>());
+            Map<BlockPos, BuildSnapshot> totalBuild = pendingCommit.get(playerId);
 
+            // We only record if we haven't tracked this position in the CURRENT session
             if (!changes.containsKey(pos)) {
-                changes.put(pos, originalState);
+
+            /* CRITICAL FIX:
+               If this block was already part of a previous preview session (stored in pendingCommit),
+               we must use the REAL original state from that snapshot.
+               Otherwise, we'd accidentally treat a "preview block" as a "real world block".
+            */
+                if (totalBuild != null && totalBuild.containsKey(pos)) {
+                    // Use the original state from the existing snapshot
+                    changes.put(pos, totalBuild.get(pos).originalState);
+                } else {
+                    // This is a brand new change to a block the mod hasn't touched yet
+                    changes.put(pos, currentStateAtPos);
+                }
             }
         } else {
-            // IF NOT IN PREVIEW: If the player places a block manually,
-            // we must remove it from the "Pending Commit" so the mod
-            // stops trying to roll it back or track it as a preview.
+            // ... (your existing code for non-preview cleanup)
             pendingCommit.forEach((uuid, map) -> {
                 if (map.containsKey(pos)) {
                     map.remove(pos);
@@ -227,11 +239,16 @@ public class PreviewManager {
 
         if (currentSession != null) {
             currentSession.forEach((pos, originalState) -> {
+                BlockState currentState = level.getBlockState(pos);
+
+                // If currentState is Air, it means the player broke the block.
+                // We MUST keep this in the snapshot as 'Air' so the preview knows to show it as empty.
                 if (!complexSnapshot.containsKey(pos)) {
-                    complexSnapshot.put(pos, new BuildSnapshot(originalState, level.getBlockState(pos)));
+                    complexSnapshot.put(pos, new BuildSnapshot(originalState, currentState));
                 } else {
                     BuildSnapshot existing = complexSnapshot.get(pos);
-                    complexSnapshot.put(pos, new BuildSnapshot(existing.originalState, level.getBlockState(pos)));
+                    // Update the build state (even if it's Air) while keeping the REAL world original state
+                    complexSnapshot.put(pos, new BuildSnapshot(existing.originalState, currentState));
                 }
             });
         }
@@ -249,13 +266,22 @@ public class PreviewManager {
         }
 
         if (complexSnapshot != null) {
+            if (currentSession != null) {
+                currentSession.forEach((pos, originalState) -> {
+                    level.setBlock(pos, originalState, 2);
+                });
+            }
             complexSnapshot.forEach((pos, snapshot) -> {
-                // Change this line:
                 level.setBlock(pos, snapshot.originalState, 2);
             });
         }
 
-
+        if (currentSession != null) {
+            currentSession.forEach((pos, originalState) -> {
+                // We use Flag 2 | 16 to avoid physics updates/neighbor notifications during revert
+                level.setBlock(pos, originalState, 2 | 16);
+            });
+        }
 
         // 5. RESTORE PLAYER STATE
         player.removeAllEffects();

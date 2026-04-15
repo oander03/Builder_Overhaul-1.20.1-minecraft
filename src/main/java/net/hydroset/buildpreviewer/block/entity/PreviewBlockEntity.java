@@ -48,31 +48,18 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     private final ItemStackHandler itemHandler = new ItemStackHandler(108) {
 
         @Override
-
         protected void onContentsChanged(int slot) {
-
-// This tells the game to save the block to the hard drive when items change
-
             setChanged();
-
-            if (level != null) {
-
+            if (level != null && !level.isClientSide) {
                 level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
-
             }
-
         }
 
 
 
         @Override
-
         public int getSlotLimit(int slot) {
-
-// Allow the internal storage to go up to 1000 (or whatever your max req is)
-
             return 1000;
-
         }
 
 
@@ -118,7 +105,8 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
     // This handles the packet sent by level.sendBlockUpdated
     @Override
-    public Packet<ClientGamePacketListener> getUpdatePacket() {
+    public Packet<ClientGamePacketListener> getUpdatePacket()
+    {
         return ClientboundBlockEntityDataPacket.create(this);
     }
 
@@ -137,18 +125,33 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         hopperBlocker.invalidate();
     }
 
-    // This handles the data when it arrives at the client
+    public void updateBlock() {
+        if (level != null && !level.isClientSide) { // Change to !level.isClientSide
+            // 1. Mark the data as changed so it saves to the disk
+            this.setChanged();
+
+            // 2. Tell the world to send a sync packet to all nearby clients
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+
+
+
     @Override
     public void onDataPacket(net.minecraft.network.Connection net, ClientboundBlockEntityDataPacket pkt) {
         CompoundTag tag = pkt.getTag();
         if (tag != null) {
-            load(tag);
-            // Force the UI to refresh if it's open
+            // 1. Load the data into the BlockEntity variables
+            this.load(tag);
+
+            // 2. Refresh the render/light data without triggering a network loop
             if (level != null && level.isClientSide) {
-                level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+                // This is the LIGHTWEIGHT way to tell Minecraft to redraw the block
+                level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 2);
             }
         }
     }
+
     @Override
     public void handleUpdateTag(CompoundTag tag) {
         // This receives that data on the Client side

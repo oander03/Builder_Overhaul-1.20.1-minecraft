@@ -57,10 +57,6 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     private static final ResourceLocation TEXTURE =
             new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/preview_block_gui.png");
 
-    // Use the 'tab_items' texture for the cleaner scroll handle
-    private static final ResourceLocation SCROLLER_TEXTURE =
-            new ResourceLocation("minecraft", "textures/gui/container/creative_inventory/tab_items.png");
-
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         int direction = delta > 0 ? -1 : 1;
@@ -70,6 +66,49 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         return true;
     }
 
+    private boolean isScrolling = false;
+
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        int x = (width - imageWidth) / 2;
+        int y = (height - imageHeight) / 2;
+
+        // Check if mouse is within the scroll bar column
+        if (mouseX >= x + 174 && mouseX <= x + 174 + 12) {
+            if (mouseY >= y + 18 && mouseY <= y + 18 + 54) {
+                this.isScrolling = true;
+                return true;
+            }
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        this.isScrolling = false;
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (this.isScrolling) {
+            int y = (height - imageHeight) / 2 + 18;
+            int totalItems = menu.getBlockEntity().getRequiredItems().size();
+            int totalRows = (int) Math.ceil(totalItems / 9.0);
+            int maxScroll = Math.max(0, totalRows - 3);
+
+            float scrollProgress = ((float)mouseY - y - 7.5F) / (54.0F - 15.0F);
+            int newOffset = (int)((scrollProgress * maxScroll) + 0.5);
+            menu.scrollTo(newOffset);
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    // Use the villager2 texture as requested
+    private static final ResourceLocation SCROLLER_TEXTURE =
+            new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/container/scroll_bar.png");
+
     @Override
     protected void renderBg(GuiGraphics guiGraphics, float partialTick, int mouseX, int mouseY) {
         RenderSystem.setShader(GameRenderer::getPositionTexShader);
@@ -78,23 +117,40 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         int x = (width - imageWidth) / 2;
         int y = (height - imageHeight) / 2;
 
-        // 1. Draw the Main GUI Background
+        // 1. Draw Main Background
         guiGraphics.blit(TEXTURE, x, y, 0, 0, imageWidth, imageHeight);
 
-        // 2. Draw the Scroll Bar
+        // 2. Logic for scrolling
         int totalItems = menu.getBlockEntity().getRequiredItems().size();
-        if (totalItems > 27) {
-            int totalRows = (int) Math.ceil(totalItems / 9.0);
-            int maxScroll = Math.max(0, totalRows - 3);
+        int totalRows = (int) Math.ceil(totalItems / 9.0);
+        int maxScroll = Math.max(0, totalRows - 3);
 
-            float scrollFraction = maxScroll > 0 ? (float) menu.scrollOffset / maxScroll : 0;
+        int scrollBarX = x + 174;
+        int scrollBarYTop = y + 18;
+        int scrollBarHeight = 54;
 
-            int scrollBarX = this.leftPos + 174;
-            int scrollBarAreaHeight = 54 - 15;
-            int scrollBarY = this.topPos + 18 + (int)(scrollFraction * scrollBarAreaHeight);
+        // --- DEBUG: If you see a weird pink/black box, the path is wrong.
+        // --- If you see nothing, the UV (176, 0) is pointing to a transparent pixel.
 
-            // Vanilla grey scroller handle
-            guiGraphics.blit(SCROLLER_TEXTURE, scrollBarX, scrollBarY, 232, 0, 12, 15);
+// Updated constants for your 512x256 texture
+        int textureWidth = 512;
+        int textureHeight = 256;
+
+// The dimensions of the scroll handle itself in the PNG
+        int handleWidth = 6;
+        int handleHeight = 27; // Increased to match your crop
+
+        if (maxScroll > 0) {
+            float scrollFraction = (float) menu.scrollOffset / maxScroll;
+            // Adjust handleY calculation to account for the larger handle height
+            int handleY = scrollBarYTop + (int) (scrollFraction * (scrollBarHeight - handleHeight));
+
+            // ACTIVE HANDLE (U=0)
+            guiGraphics.blit(SCROLLER_TEXTURE, scrollBarX, handleY, 0.0F, 199.0F, handleWidth, handleHeight, textureWidth, textureHeight);
+        } else {
+            // INACTIVE HANDLE (U=12)
+            // This shifts the U coordinate 12 pixels to the right to grab the second bar
+            guiGraphics.blit(SCROLLER_TEXTURE, scrollBarX, scrollBarYTop, 12.0F, 199.0F, handleWidth, handleHeight, textureWidth, textureHeight);
         }
     }
 

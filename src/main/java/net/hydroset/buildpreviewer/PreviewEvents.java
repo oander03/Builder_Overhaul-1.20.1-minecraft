@@ -2,6 +2,7 @@ package net.hydroset.buildpreviewer;
 
 import net.hydroset.buildpreviewer.block.entity.PreviewBlockEntity;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
@@ -78,9 +79,35 @@ public class PreviewEvents {
     }
 
     @SubscribeEvent
+    public static void onDimensionChange(net.minecraftforge.event.entity.EntityTravelToDimensionEvent event) {
+        // Check if the entity traveling is a player
+        if (event.getEntity() instanceof Player player) {
+            // Check if that player is currently in Preview Mode
+            if (PreviewManager.isInPreview(player.getUUID())) {
+                // Cancel the teleportation
+                event.setCanceled(true);
+
+                // Notify the player
+                if (!player.level().isClientSide) {
+                    player.displayClientMessage(Component.literal("§cYou cannot change dimensions while in Preview Mode!"), true);
+                    player.displayClientMessage(Component.literal("§eExit preview at the anchor first."), false);
+                }
+            }
+        }
+    }
+
+    @SubscribeEvent
     public static void onInteract(PlayerInteractEvent.RightClickBlock event) {
         if (PreviewManager.isInPreview(event.getEntity().getUUID())) {
             Item item = event.getItemStack().getItem();
+
+            BlockState targetedBlock = event.getLevel().getBlockState(event.getPos());
+
+            // Prevent interacting with portals
+            if (targetedBlock.is(Blocks.NETHER_PORTAL) || targetedBlock.is(Blocks.END_PORTAL)) {
+                event.setCanceled(true);
+                return;
+            }
 
             // If it's in your list, stop EVERYTHING.
             // No animations, no sound, no spawning.
@@ -307,13 +334,70 @@ public class PreviewEvents {
     }
 
     @SubscribeEvent
+    public static void onBlockDrops(BlockEvent.BreakEvent event) {
+        BlockPos pos = event.getPos();
+        for (Map<BlockPos, PreviewManager.BuildSnapshot> buildMap : PreviewManager.pendingCommit.values()) {
+            if (buildMap.containsKey(pos)) {
+                // This is a preview block; ensure it drops NOTHING if it somehow breaks
+                event.setExpToDrop(0);
+                // Note: Canceled BreakEvents usually don't drop items anyway,
+                // but this is a solid backup.
+            }
+        }
+    }
+
+    @SubscribeEvent
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
+
         Player player = event.getPlayer();
+
         if (PreviewManager.isInPreview(player.getUUID())) {
+
+            PreviewManager.recordChange(player.getUUID(), event.getPos(), event.getState());
+            
             BlockPos targetPos = event.getPos();
             BlockPos anchorPos = PreviewManager.getAnchorPos(player.getUUID());
 
-            PreviewManager.recordChange(player.getUUID(), event.getPos(), event.getState());
+
+
+            BlockState state = event.getState();
+            // Block breaking of Portals
+            if (state.is(Blocks.NETHER_PORTAL) || state.is(Blocks.END_PORTAL) || state.is(Blocks.END_GATEWAY)) {
+                event.setCanceled(true);
+                return;
+            }
+
+            BlockPos pos = event.getPos();
+            // 2. Prevent breaking the FRAME (Obsidian) or any block touching a portal
+            // We check North, South, East, West, Up, and Down
+            for (Direction direction : Direction.values()) {
+                BlockState neighborState = event.getLevel().getBlockState(pos.relative(direction));
+                if (neighborState.is(Blocks.NETHER_PORTAL)) {
+                    event.setCanceled(true);
+                    if (!event.getLevel().isClientSide()) {
+                        player.displayClientMessage(Component.literal("§cCannot break blocks touching a portal!"), true);
+                    }
+                    return;
+                }
+            }
+
+            Player breakingPlayer = event.getPlayer();
+
+            // 1. GLOBAL PROTECTION: Check if ANYONE has this block in their preview
+            for (Map<BlockPos, PreviewManager.BuildSnapshot> buildMap : PreviewManager.pendingCommit.values()) {
+                if (buildMap.containsKey(pos)) {
+                    // Check if the builder is trying to break their own preview block
+                    if (PreviewManager.isInPreview(breakingPlayer.getUUID())) {
+                        // Let the existing preview logic handle it (record change, etc.)
+                        // This part is already handled further down in your file
+                    } else {
+                        // If a random survival player tries to mine it:
+                        event.setCanceled(true);
+                        breakingPlayer.displayClientMessage(Component.literal("§cThis is a preview block and cannot be mined!"), true);
+                        return;
+                    }
+                }
+            }
 
             // Check if the block being broken is the specific anchor block
             if (targetPos.equals(anchorPos)) {
