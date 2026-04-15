@@ -154,29 +154,22 @@ public class PreviewManager {
         UUID id = player.getUUID();
         Level level = player.level();
 
-        // 1. Eject items as usual
         if (level.getBlockEntity(pos) instanceof PreviewBlockEntity be) {
             be.ejectItemsToPlayer(player);
 
-            // --- NEW SYNC LOGIC ---
-            // If the Block Entity has a saved build, "teach" the Manager about it again
+            // FIX: Always put a new map here.
+            // This clears any "junk" from previous sessions/worlds.
             Map<BlockPos, BuildSnapshot> savedBuild = be.getBuildSnapshots();
-            if (savedBuild != null && !savedBuild.isEmpty()) {
-                // Repopulate the manager's static memory from the BE's NBT data
-                pendingCommit.put(id, new HashMap<>(savedBuild));
-            }
-            // ----------------------
+            pendingCommit.put(id, new HashMap<>(savedBuild != null ? savedBuild : Collections.emptyMap()));
         }
 
         startInventoryPreview(player);
         previousGameModes.put(id, player.gameMode.getGameModeForPlayer());
         playerAnchorPos.put(id, pos);
 
-        // This will now work because 'pendingCommit' was just filled above!
-        restorePendingBuild(player);
-
+        restorePendingBuild(player); // Now safe to call
         player.setGameMode(GameType.CREATIVE);
-        player.displayClientMessage(Component.literal("§dResuming Preview Mode"), true);
+        player.displayClientMessage(Component.literal("§dEntering Build Mode"), true);
     }
 
     private static void restorePendingBuild(ServerPlayer player) {
@@ -233,75 +226,52 @@ public class PreviewManager {
         Level level = player.level();
         BlockPos anchor = playerAnchorPos.get(id);
 
-        // 1. MERGE SESSION INTO PENDING COMMIT
         Map<BlockPos, BlockState> currentSession = sessionChanges.get(id);
         Map<BlockPos, BuildSnapshot> complexSnapshot = pendingCommit.computeIfAbsent(id, k -> new HashMap<>());
 
+        // 1. Sync the current session into the complex snapshot
         if (currentSession != null) {
             currentSession.forEach((pos, originalState) -> {
                 BlockState currentState = level.getBlockState(pos);
-
-                // If currentState is Air, it means the player broke the block.
-                // We MUST keep this in the snapshot as 'Air' so the preview knows to show it as empty.
                 if (!complexSnapshot.containsKey(pos)) {
                     complexSnapshot.put(pos, new BuildSnapshot(originalState, currentState));
                 } else {
                     BuildSnapshot existing = complexSnapshot.get(pos);
-                    // Update the build state (even if it's Air) while keeping the REAL world original state
                     complexSnapshot.put(pos, new BuildSnapshot(existing.originalState, currentState));
                 }
             });
         }
 
-        // 2. CALCULATE COST
+        // 2. Save data to the Anchor
         Map<Item, Integer> cost = calculateRequiredItems(player);
-
-        // 3. SEND ALL DATA TO ANCHOR (Merged into one block for clarity)
         if (anchor != null && level.getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
-            // This is the line that was red—it now sees 'complexSnapshot' defined above
             be.setBuildData(complexSnapshot, cost, id);
-            be.setRequiredItems(cost, id);
-            // Force the sync to client
             level.sendBlockUpdated(anchor, level.getBlockState(anchor), level.getBlockState(anchor), 3);
         }
 
-        if (complexSnapshot != null) {
-            if (currentSession != null) {
-                currentSession.forEach((pos, originalState) -> {
-                    level.setBlock(pos, originalState, 2);
-                });
-            }
-            complexSnapshot.forEach((pos, snapshot) -> {
-                level.setBlock(pos, snapshot.originalState, 2);
-            });
-        }
+        // 3. PHYSICAL WORLD ROLLBACK
+        // We only need to iterate complexSnapshot. It now contains EVERYTHING the mod has ever touched.
+        complexSnapshot.forEach((pos, snapshot) -> {
+            level.setBlock(pos, snapshot.originalState, 2 | 16);
+        });
 
-        if (currentSession != null) {
-            currentSession.forEach((pos, originalState) -> {
-                // We use Flag 2 | 16 to avoid physics updates/neighbor notifications during revert
-                level.setBlock(pos, originalState, 2 | 16);
-            });
-        }
-
-        // 5. RESTORE PLAYER STATE
+        // 4. RESTORE PLAYER
         player.removeAllEffects();
         restoreInventory(player);
         player.setGameMode(previousGameModes.getOrDefault(id, GameType.SURVIVAL));
 
-        // Inside exitPreview
         if (anchor != null) {
             BlockPos safePos = findSafeTeleportPos(level, anchor);
-            // x + 0.5 and z + 0.5 centers you on the block
-            // y gives you the floor of the air block
             player.teleportTo(safePos.getX() + 0.5, safePos.getY(), safePos.getZ() + 0.5);
         }
 
-        // 7. CLEANUP ACTIVE SESSION DATA (But keep pendingCommit!)
+        // 5. CLEANUP
         sessionChanges.remove(id);
         playerAnchorPos.remove(id);
         previousGameModes.remove(id);
+        // Note: We keep pendingCommit so the 'shopping list' stays visible on the BE screen!
+        player.displayClientMessage(Component.literal("§aExiting Build Mode"), true);
 
-        player.displayClientMessage(Component.literal("§ePreview hidden. Visit anchor to finalize build!"), true);
     }
 
     public static boolean isInPreview(UUID id) {

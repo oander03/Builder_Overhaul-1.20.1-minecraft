@@ -229,10 +229,20 @@ public class PreviewEvents {
     @SubscribeEvent
     public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            // If they are somehow still in Creative but NOT in our map
-            // (This handles the 'I logged out in Creative' bug)
+            // 1. Get the world's default game mode (Creative, Survival, etc.)
+            GameType defaultMode = player.getServer().getDefaultGameType();
+
+            // 2. If the world itself is a Creative world, we don't need to force anything.
+            if (defaultMode == GameType.CREATIVE) return;
+
+            // 3. If they are in Creative but the world is Survival, check if they are in a preview.
             if (player.gameMode.getGameModeForPlayer() == GameType.CREATIVE && !PreviewManager.isInPreview(player.getUUID())) {
-                // Check if they should be in survival (you might need a custom capability to track this persistently)
+
+                // 4. Final Safety: Check if the player is an Admin/OP (Permission Level 2+).
+                // If they are an OP, assume they are in Creative intentionally and leave them alone.
+                if (player.hasPermissions(2)) return;
+
+                // Only if they are a normal player in a Survival world who isn't in a preview session
                 player.setGameMode(GameType.SURVIVAL);
             }
         }
@@ -347,6 +357,13 @@ public class PreviewEvents {
     }
 
     @SubscribeEvent
+    public static void onServerStopping(net.minecraftforge.event.server.ServerStoppingEvent event) {
+        // Wipe everything to prevent "Ghost Worlds"
+        PreviewManager.pendingCommit.clear();
+        // Clear other static maps here if needed
+    }
+
+    @SubscribeEvent
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
 
         Player player = event.getPlayer();
@@ -354,7 +371,7 @@ public class PreviewEvents {
         if (PreviewManager.isInPreview(player.getUUID())) {
 
             PreviewManager.recordChange(player.getUUID(), event.getPos(), event.getState());
-            
+
             BlockPos targetPos = event.getPos();
             BlockPos anchorPos = PreviewManager.getAnchorPos(player.getUUID());
 

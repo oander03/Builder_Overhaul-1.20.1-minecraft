@@ -334,17 +334,16 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
             tag.putUUID("Owner", ownerUUID);
         }
     }
-
     @Override
     public void load(CompoundTag tag) {
         super.load(tag);
-
-        // Clear existing data before loading
         this.buildSnapshots.clear();
         this.requiredItems.clear();
 
-        // IMPORTANT: Use BuiltInRegistries if level is null (happens during world load)
-        var lookup = net.minecraft.core.registries.BuiltInRegistries.BLOCK.asLookup();
+        // Use the specific registry lookup for the current world state
+        var lookup = this.level != null ?
+                this.level.holderLookup(Registries.BLOCK) :
+                net.minecraft.core.registries.BuiltInRegistries.BLOCK.asLookup();
 
         if (tag.contains("BuildSnapshots")) {
             ListTag snapshotList = tag.getList("BuildSnapshots", 10);
@@ -352,7 +351,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
                 CompoundTag entryTag = snapshotList.getCompound(i);
                 BlockPos pos = BlockPos.of(entryTag.getLong("pos"));
 
-                // Read the NBT tags back into BlockState objects
+                // Read states using the lookup
                 BlockState original = NbtUtils.readBlockState(lookup, entryTag.getCompound("original"));
                 BlockState build = NbtUtils.readBlockState(lookup, entryTag.getCompound("build"));
 
