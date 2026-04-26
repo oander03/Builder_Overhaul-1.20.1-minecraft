@@ -172,62 +172,73 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     // Inside PreviewBlockEntity.java
 
     public void checkRequirementsAndCommit(ServerPlayer player) {
-        UUID id = player.getUUID();
-
-        // CHANGE: Check this.buildSnapshots instead of PreviewManager.pendingCommit
-        boolean hasPendingBuild = !this.buildSnapshots.isEmpty();
-
-        if (!hasPendingBuild) {
+        if (this.buildSnapshots.isEmpty()) {
             player.sendSystemMessage(Component.literal("§cNo active build to finalize!"));
             return;
         }
 
-        // Calculate items normally
-        Map<Item, Integer> providedItems = new HashMap<>();
-        for (int i = 0; i < itemHandler.getSlots(); i++) {
-            ItemStack stack = itemHandler.getStackInSlot(i);
-            if (!stack.isEmpty()) {
-                providedItems.put(stack.getItem(), providedItems.getOrDefault(stack.getItem(), 0) + stack.getCount());
+        // 1. Prepare to track what we actually build
+        Map<BlockPos, PreviewManager.BuildSnapshot> blocksToPlace = new HashMap<>();
+        Map<BlockPos, PreviewManager.BuildSnapshot> remainingSnapshots = new HashMap<>(this.buildSnapshots);
+
+        // 2. Iterate through snapshots and check if we have the items for each
+        for (Map.Entry<BlockPos, PreviewManager.BuildSnapshot> entry : this.buildSnapshots.entrySet()) {
+            BlockPos pos = entry.getKey();
+            PreviewManager.BuildSnapshot snapshot = entry.getValue();
+            BlockState plannedState = snapshot.buildState;
+
+            // If it's a "break" (Air), it's free!
+            if (plannedState.isAir()) {
+                blocksToPlace.put(pos, snapshot);
+                remainingSnapshots.remove(pos);
+                continue;
+            }
+
+            // Check if we have the block in our itemHandler
+            Item itemNeeded = plannedState.getBlock().asItem();
+            if (itemNeeded != Items.AIR) {
+                if (hasAndConsumeSingleItem(itemNeeded)) {
+                    blocksToPlace.put(pos, snapshot);
+                    remainingSnapshots.remove(pos);
+                }
             }
         }
 
-        // 3. DEFINE 'hasEverything' by checking the costs
-        boolean hasEverything = true;
-        for (Map.Entry<Item, Integer> entry : requiredItems.entrySet()) {
-            if (providedItems.getOrDefault(entry.getKey(), 0) < entry.getValue()) {
-                hasEverything = false;
-                int missingCount = entry.getValue() - providedItems.getOrDefault(entry.getKey(), 0);
+        // 3. Commit only the blocks we could afford
+        if (!blocksToPlace.isEmpty()) {
+            PreviewBlock.commitBuild(player, blocksToPlace);
 
-                player.sendSystemMessage(Component.literal("§cMissing: " + missingCount + "x ")
-                        .append(Component.translatable(entry.getKey().getDescriptionId())));
-                break;
-            }
+            // 4. Update the BlockEntity's memory with what's left
+            this.buildSnapshots = remainingSnapshots;
+
+            // Recalculate cost based on remaining snapshots
+            this.requiredItems = PreviewManager.calculateRequiredItemsFromMap(this.buildSnapshots);
+
+        } else {
+            player.sendSystemMessage(Component.literal("§cNot enough items to place any more blocks!"));
         }
 
-        // 4. If the check passed, consume items and build!
-        if (hasEverything) {
-            consumeRequiredItems();
-            ejectItemsToPlayer(player);
-
-            // CRITICAL: Pass 'this.buildSnapshots' here!
-            PreviewBlock.commitBuild(player, this.buildSnapshots);
-
-            // 4. Clear the manager's memory (if they happened to go into preview)
-            PreviewManager.pendingCommit.remove(id);
-
-            // 5. Clear this block's memory
-            this.buildSnapshots.clear();
+        // 5. Cleanup and Sync
+        if (this.buildSnapshots.isEmpty()) {
             this.requiredItems.clear();
-
-            // Clear the physical slots
-            for (int i = 0; i < itemHandler.getSlots(); i++) {
-                itemHandler.setStackInSlot(i, ItemStack.EMPTY);
-            }
-
-            this.setChanged();
-            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+            ejectItemsToPlayer(player); // Give back any leftover "wrong" items
             player.closeContainer();
         }
+
+        this.setChanged();
+        level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+    }
+
+    private boolean hasAndConsumeSingleItem(Item item) {
+        for (int i = 0; i < itemHandler.getSlots(); i++) {
+            ItemStack stack = itemHandler.getStackInSlot(i);
+            if (stack.is(item) && !stack.isEmpty()) {
+                // Extract 1 item (false = not a simulation, actually do it)
+                itemHandler.extractItem(i, 1, false);
+                return true;
+            }
+        }
+        return false;
     }
 
     public void ejectItemsToPlayer(ServerPlayer player) {

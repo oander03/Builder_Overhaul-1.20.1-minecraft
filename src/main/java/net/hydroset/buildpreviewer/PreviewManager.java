@@ -27,6 +27,7 @@ public class PreviewManager {
     public static final Map<UUID, Map<BlockPos, BuildSnapshot>> pendingCommit = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<UUID, Map<BlockPos, BlockState>> sessionChanges = new java.util.concurrent.ConcurrentHashMap<>();
 
+
     public static class BuildSnapshot {
         public BlockState originalState;
         public final BlockState buildState;
@@ -40,6 +41,7 @@ public class PreviewManager {
             this.originalState = newState;
         }
     }
+
 
 
     public static void recordChange(UUID playerId, BlockPos pos, BlockState currentStateAtPos) {
@@ -157,8 +159,7 @@ public class PreviewManager {
         ));
     }
 
-    private static Map<Item, Integer> calculateRequiredItemsFromMap(Map<BlockPos, BuildSnapshot> buildData) {
-        Map<Item, Integer> requirements = new HashMap<>();
+    public static Map<Item, Integer> calculateRequiredItemsFromMap(Map<BlockPos, BuildSnapshot> buildData) {        Map<Item, Integer> requirements = new HashMap<>();
         buildData.forEach((pos, snapshot) -> {
             if (!snapshot.buildState.equals(snapshot.originalState) && !snapshot.buildState.isAir()) {
                 Item item = snapshot.buildState.getBlock().asItem();
