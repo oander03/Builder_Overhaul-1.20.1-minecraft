@@ -27,12 +27,16 @@ public class PreviewManager {
     private static final Map<UUID, Map<BlockPos, BlockState>> sessionChanges = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static class BuildSnapshot {
-        public final BlockState originalState;
+        public BlockState originalState;
         public final BlockState buildState;
 
         public BuildSnapshot(BlockState original, BlockState build) {
             this.originalState = original;
             this.buildState = build;
+        }
+
+        public void updateOriginalState(BlockState newState) {
+            this.originalState = newState;
         }
     }
 
@@ -137,6 +141,19 @@ public class PreviewManager {
         ));
     }
 
+    private static Map<Item, Integer> calculateRequiredItemsFromMap(Map<BlockPos, BuildSnapshot> buildData) {
+        Map<Item, Integer> requirements = new HashMap<>();
+        buildData.forEach((pos, snapshot) -> {
+            if (!snapshot.buildState.equals(snapshot.originalState) && !snapshot.buildState.isAir()) {
+                Item item = snapshot.buildState.getBlock().asItem();
+                if (item != Items.AIR) {
+                    requirements.put(item, requirements.getOrDefault(item, 0) + 1);
+                }
+            }
+        });
+        return requirements;
+    }
+
     public static void enterPreview(ServerPlayer player, BlockPos pos) {
         UUID id = player.getUUID();
         Level level = player.level();
@@ -144,10 +161,33 @@ public class PreviewManager {
         if (level.getBlockEntity(pos) instanceof PreviewBlockEntity be) {
             be.ejectItemsToPlayer(player);
 
-            // FIX: Always put a new map here.
-            // This clears any "junk" from previous sessions/worlds.
+            // 1. Get the existing snapshots from the Block Entity
             Map<BlockPos, BuildSnapshot> savedBuild = be.getBuildSnapshots();
-            pendingCommit.put(id, new HashMap<>(savedBuild != null ? savedBuild : Collections.emptyMap()));
+            Map<BlockPos, BuildSnapshot> validatedBuild = new HashMap<>();
+
+            if (savedBuild != null) {
+                savedBuild.forEach((blockPos, snapshot) -> {
+                    BlockState worldState = level.getBlockState(blockPos);
+
+                    // LOGIC: Check if this was a "Red Block" (intent to break)
+                    // If the player wanted it to be Air, but it's ALREADY Air in the world,
+                    // we skip adding it to the validatedBuild (effectively deleting it from memory).
+                    if (snapshot.buildState.isAir() && worldState.isAir()) {
+                        // Do nothing - this "red block" is already gone in survival.
+                        return;
+                    }
+
+                    // Otherwise, keep it in the session
+                    validatedBuild.put(blockPos, snapshot);
+                });
+            }
+
+            // 2. Put the cleaned-up map into the manager's memory
+            pendingCommit.put(id, validatedBuild);
+
+            // 3. Optional: Sync the cleaned map back to the Block Entity immediately
+            // so the "Shopping List" updates even before you exit.
+            be.setBuildData(validatedBuild, calculateRequiredItemsFromMap(validatedBuild), id);
         }
 
         startInventoryPreview(player);
@@ -172,7 +212,7 @@ public class PreviewManager {
 
                 buildData.forEach((pos, snapshot) -> {
                     // We use Flag 2 here to prevent neighbor updates (breaking torches/blocks)
-                    level.setBlock(pos, snapshot.buildState, 2);
+                    level.setBlock(pos, snapshot.buildState, 2 | 16 | 32);
                 });
 
                 player.displayClientMessage(Component.literal("§aRestored preview from saved data!"), true);
@@ -240,9 +280,19 @@ public class PreviewManager {
         complexSnapshot.forEach((pos, snapshot) -> {
             if (level.hasChunkAt(pos)) {
                 BlockState worldNow = level.getBlockState(pos);
-                // Only rollback if the world state is NOT what we're trying to roll back to.
-                // This prevents "re-creating" blocks that were already removed in survival.
-                if (!worldNow.equals(snapshot.originalState)) {
+
+                // 1. Check if the block in the world has changed since we ENTERED preview
+                // (i.e., someone placed a block in Survival/World while we were previewing)
+                boolean worldChangedExternally = !worldNow.equals(snapshot.buildState);
+
+                // 2. We only want to rollback if the block in the world is still our "Preview" block.
+                // If worldNow != snapshot.buildState, it means something else happened there,
+                // and we should update our 'originalState' so we don't overwrite the new block later.
+                if (worldChangedExternally) {
+                    // Update the snapshot so the "Memory" knows the world has a new reality
+                    snapshot.updateOriginalState(worldNow);
+                } else {
+                    // If the world still shows our preview block, roll it back to the original
                     level.setBlock(pos, snapshot.originalState, 2 | 16);
                 }
             }

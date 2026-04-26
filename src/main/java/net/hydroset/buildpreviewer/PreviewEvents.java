@@ -61,6 +61,26 @@ public class PreviewEvents {
             Items.SCULK_SHRIEKER
     );
 
+    private static final Set<net.minecraft.world.level.block.Block> BANNED_BLOCKS_TO_BREAK = Set.of(
+            Blocks.BEDROCK,
+            Blocks.SPAWNER,
+            Blocks.END_PORTAL_FRAME,
+            Blocks.BARRIER,
+            Blocks.COMMAND_BLOCK,
+            Blocks.CHAIN_COMMAND_BLOCK,
+            Blocks.REPEATING_COMMAND_BLOCK,
+            Blocks.DRAGON_EGG
+    );
+
+    @SubscribeEvent
+    public static void preventDropsDuringPreview(BlockEvent.BreakEvent event) {
+        if (PreviewManager.isInPreview(event.getPlayer().getUUID())) {
+            // This ensures that even if a block "pops" due to physics,
+            // it doesn't leave an item behind to clutter the world.
+            event.setExpToDrop(0);
+        }
+    }
+
     @SubscribeEvent
     public static void onEntitySpawn(EntityJoinLevelEvent event) {
         // Check if the entity is one of the "dangerous" ones
@@ -316,34 +336,6 @@ public class PreviewEvents {
     }
 
     @SubscribeEvent
-    public static void onSurvivalBlockBreak(BlockEvent.BreakEvent event) {
-        if (event.getLevel().isClientSide()) return;
-
-        BlockPos pos = event.getPos();
-        UUID playerId = event.getPlayer().getUUID();
-
-        // Check if the player has a pending build
-        if (PreviewManager.pendingCommit.containsKey(playerId)) {
-            Map<BlockPos, PreviewManager.BuildSnapshot> snapshot = PreviewManager.pendingCommit.get(playerId);
-
-            // If the block they just broke in Survival is in our "Restore" list...
-            if (snapshot.containsKey(pos)) {
-                // Update the 'originalState' to Air so it doesn't reappear
-                // OR simply remove it from the snapshot if it was a block they placed
-                snapshot.remove(pos);
-
-                // Re-sync the shopping list since the world has changed
-                // This prevents them from having to "pay" for a block they just broke
-                if (event.getPlayer() instanceof ServerPlayer serverPlayer) {
-                    Map<Item, Integer> newCost = PreviewManager.calculateRequiredItems(serverPlayer);
-                    // Update the Anchor BlockEntity with the new cost
-                    PreviewManager.updateAnchorCost(serverPlayer, newCost);
-                }
-            }
-        }
-    }
-
-    @SubscribeEvent
     public static void onBlockDrops(BlockEvent.BreakEvent event) {
         BlockPos pos = event.getPos();
         for (Map<BlockPos, PreviewManager.BuildSnapshot> buildMap : PreviewManager.pendingCommit.values()) {
@@ -374,10 +366,16 @@ public class PreviewEvents {
 
             BlockPos targetPos = event.getPos();
             BlockPos anchorPos = PreviewManager.getAnchorPos(player.getUUID());
-
-
-
             BlockState state = event.getState();
+
+            // --- NEW: Check Banned Blocks List ---
+            if (BANNED_BLOCKS_TO_BREAK.contains(state.getBlock())) {
+                event.setCanceled(true);
+                if (!event.getLevel().isClientSide()) {
+                    player.displayClientMessage(Component.literal("§cThis block is protected and cannot be broken!"), true);
+                }
+                return;
+            }
             // Block breaking of Portals
             if (state.is(Blocks.NETHER_PORTAL) || state.is(Blocks.END_PORTAL) || state.is(Blocks.END_GATEWAY)) {
                 event.setCanceled(true);
