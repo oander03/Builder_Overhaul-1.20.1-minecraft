@@ -295,8 +295,18 @@ public class PreviewEvents {
 
     @SubscribeEvent
     public static void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
+
         if (event.getEntity() instanceof Player player) {
             UUID uuid = player.getUUID();
+
+            if (!PreviewManager.isInPreview(player.getUUID())) {
+                PreviewManager.recordChange(
+                        player.getUUID(),
+                        event.getPos(),
+                        event.getPlacedBlock()
+                );
+            }
+
             if (PreviewManager.isInPreview(uuid)) {
                 BlockPos pos = event.getPos();
                 // Get the snapshot of what was there BEFORE the placement
@@ -359,6 +369,15 @@ public class PreviewEvents {
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
 
         Player player = event.getPlayer();
+
+        if (!PreviewManager.isInPreview(player.getUUID())) {
+            PreviewManager.recordChange(
+                    event.getPlayer().getUUID(),
+                    event.getPos(),
+                    net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()
+            );
+        }
+
 
         if (PreviewManager.isInPreview(player.getUUID())) {
 

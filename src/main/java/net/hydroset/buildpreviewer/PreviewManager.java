@@ -57,7 +57,22 @@ public class PreviewManager {
             // If anyone breaks a block in the world in Survival,
             // no preview should ever try to roll it back to a previous state.
             pendingCommit.forEach((uuid, map) -> {
-                map.remove(pos);
+                if (!isInPreview(uuid)) {
+                    if (map.containsKey(pos)) {
+                        BuildSnapshot snapshot = map.get(pos);
+
+                        // If the block is broken in survival and becomes Air,
+                        // and the preview also wanted it to be Air, we can just remove it.
+                        if (currentStateAtPos.isAir() && snapshot.buildState.isAir()) {
+                            map.remove(pos);
+                        } else {
+                            // CRITICAL: Update the originalState to the NEW survival block.
+                            // If you replaced Stone with Wood, originalState is now Wood.
+                            // When you enter/exit preview later, it rolls back to Wood.
+                            snapshot.updateOriginalState(currentStateAtPos);
+                        }
+                    }
+                }
             });
         }
     }
@@ -175,6 +190,11 @@ public class PreviewManager {
                     if (snapshot.buildState.isAir() && worldState.isAir()) {
                         // Do nothing - this "red block" is already gone in survival.
                         return;
+                    }
+
+                    if (!worldState.equals(snapshot.buildState) && !worldState.equals(snapshot.originalState)) {
+                        // Update the 'originalState' so rollbacks target the NEW survival block.
+                        snapshot.updateOriginalState(worldState);
                     }
 
                     // Otherwise, keep it in the session
