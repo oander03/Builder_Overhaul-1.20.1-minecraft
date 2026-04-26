@@ -176,7 +176,7 @@ public class PreviewManager {
 
         BlockState state = level.getBlockState(pos);
         if (state.hasProperty(PreviewBlock.ACTIVE)) {
-            level.setBlock(pos, state.setValue(PreviewBlock.ACTIVE, true), 3);
+            level.setBlock(pos, state.setValue(PreviewBlock.ACTIVE, true), 18);
         }
 
         if (level.getBlockEntity(pos) instanceof PreviewBlockEntity be) {
@@ -286,7 +286,7 @@ public class PreviewManager {
         if (anchor != null) {
             BlockState state = level.getBlockState(anchor);
             if (state.hasProperty(PreviewBlock.ACTIVE)) {
-                level.setBlock(anchor, state.setValue(PreviewBlock.ACTIVE, false), 3);
+                level.setBlock(anchor, state.setValue(PreviewBlock.ACTIVE, false), 18);
             }
         }
 
@@ -327,8 +327,7 @@ public class PreviewManager {
                     snapshot.updateOriginalState(worldNow);
                 } else {
                     // If the world still shows our preview block, roll it back to the original
-                    level.setBlock(pos, snapshot.originalState, 2 | 16);
-                }
+                    level.setBlock(pos, snapshot.originalState, 2 | 16 | 128);                }
             }
         });
         // 4. RESTORE PLAYER
@@ -336,9 +335,11 @@ public class PreviewManager {
         restoreInventory(player);
         player.setGameMode(previousGameModes.getOrDefault(id, GameType.SURVIVAL));
 
+// Inside exitPreview
         if (anchor != null) {
             BlockPos safePos = findSafeTeleportPos(level, anchor);
-            player.teleportTo(safePos.getX() + 0.5, safePos.getY(), safePos.getZ() + 0.5);
+            // Add 0.2 to Y to ensure the player "falls" into place rather than "spawning in" the floor
+            player.teleportTo(safePos.getX() + 0.5, safePos.getY() + 0.2, safePos.getZ() + 0.5);
         }
 
         // 5. CLEANUP
@@ -361,8 +362,9 @@ public class PreviewManager {
         // This loop checks y=1 (right on top), then y=2, then y=3
         for (int y = 1; y <= 4; y++) {
             BlockPos centerCheck = startPos.above(y);
-            if (level.getBlockState(centerCheck).isAir() &&
-                    level.getBlockState(centerCheck.above()).isAir()) {
+            // Use canPassThrough or check collision shape
+            if (level.getBlockState(centerCheck).getCollisionShape(level, centerCheck).isEmpty() &&
+                    level.getBlockState(centerCheck.above()).getCollisionShape(level, centerCheck.above()).isEmpty()) {
                 return centerCheck;
             }
         }

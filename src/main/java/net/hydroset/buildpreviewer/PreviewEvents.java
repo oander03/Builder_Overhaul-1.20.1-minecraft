@@ -266,15 +266,6 @@ public class PreviewEvents {
             BlockPos anchor = PreviewManager.getAnchorPos(player.getUUID());
             Level level = player.level();
 
-            // 1. Force the texture and particles OFF immediately
-            if (anchor != null) {
-                BlockState state = level.getBlockState(anchor);
-                // Ensure we are actually looking at our PreviewBlock
-                if (state.hasProperty(net.hydroset.buildpreviewer.block.PreviewBlock.ACTIVE)) {
-                    level.setBlock(anchor, state.setValue(net.hydroset.buildpreviewer.block.PreviewBlock.ACTIVE, false), 3);
-                }
-            }
-
             // 2. If the world itself is a Creative world, we don't need to force anything.
             if (defaultMode == GameType.CREATIVE) return;
 
