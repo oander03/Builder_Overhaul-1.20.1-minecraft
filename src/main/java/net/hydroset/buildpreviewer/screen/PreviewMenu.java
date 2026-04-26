@@ -104,9 +104,17 @@ public class PreviewMenu extends AbstractContainerMenu {
                         public int getMaxStackSize() {
                             int currentIndex = getSlotIndex();
                             if (currentIndex < itemList.size()) {
+                                // Return the actual requirement, even if it's 500
                                 return reqs.get(itemList.get(currentIndex));
                             }
                             return 64;
+                        }
+
+                        @Override
+                        public int getMaxStackSize(ItemStack stack) {
+                            // Some Forge versions check the stack specifically.
+                            // Override this to match the slot's max.
+                            return getMaxStackSize();
                         }
                     });
                 }

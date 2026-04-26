@@ -202,12 +202,14 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             if (reqIndex >= cachedReqList.size()) continue;
 
             Item reqItem = cachedReqList.get(reqIndex).getKey();
-            int totalNeeded = cachedReqList.get(reqIndex).getValue();
 
-// FIX: Use the tempStacks array we saved during the bypass trick!
+
+// Inside PreviewScreen.java -> render() loop
             ItemStack stackInSlot = tempStacks[i];
 
-            int currentInSlot = (stackInSlot.is(reqItem)) ? stackInSlot.getCount() : 0;
+// Force the count to an Integer to prevent byte-wrapping glitches
+            int currentInSlot = (stackInSlot.is(reqItem)) ? (int)stackInSlot.getCount() : 0;
+            int totalNeeded = cachedReqList.get(reqIndex).getValue();
             int remaining = totalNeeded - currentInSlot;
 
             int x = this.leftPos + slot.x;

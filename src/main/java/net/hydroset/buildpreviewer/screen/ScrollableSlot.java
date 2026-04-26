@@ -4,6 +4,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.IItemHandlerModifiable;
 import net.minecraftforge.items.SlotItemHandler;
+import org.jetbrains.annotations.NotNull;
 
 public class ScrollableSlot extends SlotItemHandler {
     private int activeIndex; // This is the index that changes when you scroll
@@ -47,11 +48,9 @@ public class ScrollableSlot extends SlotItemHandler {
     }
 
     @Override
-    public int getMaxStackSize(ItemStack stack) {
-        // This is the crucial one!
-        // It tells the mouse-drag/click logic that even if it's 'Dirt',
-        // this slot can hold more than 64.
-        return this.getMaxStackSize();
+    public int getMaxStackSize(@NotNull ItemStack stack) {
+        // This forces the UI to allow clicking/dragging more than 64/128 items
+        return 1000;
     }
 
     @Override

@@ -326,9 +326,12 @@ public class PreviewEvents {
                 // Get the snapshot of what was there BEFORE the placement
                 // We use level.getBlockState(pos) which should still be Air/OldBlock
                 BlockState stateBefore = event.getLevel().getBlockState(pos);
-
+                if (player instanceof ServerPlayer serverPlayer) {
+                    PreviewManager.syncLiveCostToAnchor(serverPlayer, null);                }
                 PreviewManager.recordChange(uuid, pos, stateBefore);
+
             }
+
         }
     }
 
@@ -460,6 +463,8 @@ public class PreviewEvents {
                 event.setCanceled(true);
                 event.getPlayer().displayClientMessage(Component.literal("§cThis block is currently locked in a Preview!"), true);
             }
+            if (player instanceof ServerPlayer serverPlayer) {
+                PreviewManager.syncLiveCostToAnchor(serverPlayer, event.getPos());            }
         }
     }
 

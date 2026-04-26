@@ -65,13 +65,9 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
 
         @Override
-
-        protected int getStackLimit(int slot, @org.jetbrains.annotations.NotNull ItemStack stack) {
-
-// This forces the handler to ignore the item's natural limit (64)
-
-            return getSlotLimit(slot);
-
+        protected int getStackLimit(int slot, @NotNull ItemStack stack) {
+            // This allows the internal storage to actually hold the high numbers
+            return 1000;
         }
 
     };
@@ -221,7 +217,6 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         // 5. Cleanup and Sync
         if (this.buildSnapshots.isEmpty()) {
             this.requiredItems.clear();
-            ejectItemsToPlayer(player); // Give back any leftover "wrong" items
             player.closeContainer();
         }
 
@@ -239,20 +234,6 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
             }
         }
         return false;
-    }
-
-    public void ejectItemsToPlayer(ServerPlayer player) {
-        for (int i = 0; i < itemHandler.getSlots(); i++) {
-            ItemStack stack = itemHandler.getStackInSlot(i);
-            if (!stack.isEmpty()) {
-                // Give item to player, or drop it at their feet if full
-                if (!player.getInventory().add(stack)) {
-                    player.drop(stack, false);
-                }
-                itemHandler.setStackInSlot(i, ItemStack.EMPTY);
-            }
-        }
-        this.setChanged();
     }
 
     public Map<Item, Integer> getRequiredItems() {

@@ -12,9 +12,11 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
+import javax.annotation.Nullable;
 import java.util.*;
 
 
@@ -98,28 +100,23 @@ public class PreviewManager {
         }
     }
 
-    public static Map<Item, Integer> calculateRequiredItems(ServerPlayer player) {
+    // Update your calculator to handle the "Future" Air block
+    public static Map<Item, Integer> calculateRequiredItems(ServerPlayer player, @Nullable BlockPos pendingAir) {
         UUID id = player.getUUID();
-        // LOOK HERE: Get the pendingCommit (total build) instead of sessionChanges
         Map<BlockPos, BuildSnapshot> totalBuild = pendingCommit.get(id);
         Map<Item, Integer> requirements = new HashMap<>();
 
         if (totalBuild == null) return requirements;
 
         totalBuild.forEach((pos, snapshot) -> {
-            // We compare the 'buildState' (what the player wants)
-            // to the 'originalState' (what was there before the mod touched it)
-            BlockState plannedState = snapshot.buildState;
+            // LATEST FIX: If this is the block we are currently breaking, treat it as AIR
+            BlockState worldState = pos.equals(pendingAir) ? Blocks.AIR.defaultBlockState() : player.level().getBlockState(pos);
             BlockState originalState = snapshot.originalState;
 
-            // If the planned block is different from what was originally there
-            if (!plannedState.equals(originalState)) {
-                // If the player planned a block (not air)
-                if (!plannedState.isAir()) {
-                    Item item = plannedState.getBlock().asItem();
-                    if (item != Items.AIR) {
-                        requirements.put(item, requirements.getOrDefault(item, 0) + 1);
-                    }
+            if (!worldState.equals(originalState) && !worldState.isAir()) {
+                Item item = worldState.getBlock().asItem();
+                if (item != Items.AIR) {
+                    requirements.put(item, requirements.getOrDefault(item, 0) + 1);
                 }
             }
         });
@@ -181,7 +178,6 @@ public class PreviewManager {
         }
 
         if (level.getBlockEntity(pos) instanceof PreviewBlockEntity be) {
-            be.ejectItemsToPlayer(player);
 
             // 1. Get the existing snapshots from the Block Entity
             Map<BlockPos, BuildSnapshot> savedBuild = be.getBuildSnapshots();
@@ -248,6 +244,34 @@ public class PreviewManager {
         // Do not put buildData.forEach here! It is outside the brackets, so the variables are 'red'.
     }
 
+    public static void syncLiveCostToAnchor(ServerPlayer player, BlockPos breakingPos) {
+        UUID id = player.getUUID();
+        BlockPos anchor = playerAnchorPos.get(id);
+
+        if (anchor != null && player.level().getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+            // 1. Get the current complex snapshot
+
+
+            Map<BlockPos, BuildSnapshot> complexSnapshot = pendingCommit.computeIfAbsent(id, k -> new HashMap<>());
+
+            // 2. Sync session changes into it (so it knows about the blocks just placed/broken)
+            Map<BlockPos, BlockState> currentSession = sessionChanges.get(id);
+            if (currentSession != null) {
+                currentSession.forEach((pos, originalState) -> {
+                    BlockState currentState = player.level().getBlockState(pos);
+                    complexSnapshot.put(pos, new BuildSnapshot(originalState, currentState));
+                });
+            }
+
+            // 3. Recalculate and push to the Block Entity
+            Map<Item, Integer> liveCost = calculateRequiredItems(player, breakingPos);
+            be.setRequiredItems(liveCost, id);
+
+            // 4. Force a network sync so the GUI/Overlay knows the data changed
+            be.updateBlock();
+        }
+    }
+
     public static void restoreInventory(ServerPlayer player) {
         UUID id = player.getUUID();
 
@@ -305,7 +329,7 @@ public class PreviewManager {
         }
 
         // 2. Save data to the Anchor
-        Map<Item, Integer> cost = calculateRequiredItems(player);
+        Map<Item, Integer> cost = calculateRequiredItems(player, null);
         if (anchor != null && level.getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
             be.setBuildData(complexSnapshot, cost, id);
             be.setChanged();
