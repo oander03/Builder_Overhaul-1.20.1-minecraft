@@ -25,9 +25,8 @@ public class ModBlocks
             () -> new PreviewBlock(BlockBehaviour.Properties.copy(Blocks.IRON_BLOCK)
                     .sound(SoundType.AMETHYST)
                     // Use a lambda that correctly references the static ACTIVE property
-                    .lightLevel(state -> state.getValue(PreviewBlock.ACTIVE) ? 15 : 0)
-                    .hasPostProcess((state, pos, level) -> state.getValue(PreviewBlock.ACTIVE))
-                    .emissiveRendering((state, level, pos) -> true)
+                    .lightLevel(state -> state.getValue(PreviewBlock.ACTIVE) ? 10 : 3)
+                    //.emissiveRendering((state, level, pos) -> true)
                     .hasPostProcess((state, level, pos) -> true)
             ));
 

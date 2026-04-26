@@ -1,27 +1,13 @@
 {
   "type": "minecraft:crafting_shaped",
-  "category": "misc",
   "pattern": [
-    "IDI",
-    "RCR",
-    "SSS"
+    "III",
+    "IAI",
+    "III"
   ],
   "key": {
-    "I": {
-      "item": "minecraft:iron_block"
-    },
-    "D": {
-      "item": "minecraft:diamond"
-    },
-    "R": {
-      "item": "minecraft:redstone_block"
-    },
-    "C": {
-      "item": "minecraft:chest"
-    },
-    "S": {
-      "item": "minecraft:smooth_stone"
-    }
+    "I": { "item": "minecraft:blackstone" },
+    "A": { "item": "minecraft:emerald" }
   },
   "result": {
     "item": "build_previewer:builder_access_block"

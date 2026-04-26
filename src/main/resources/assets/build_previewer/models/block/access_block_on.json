@@ -1,9 +1,41 @@
 {
-  "parent": "minecraft:block/cube_bottom_top",
+  "parent": "minecraft:block/block",
   "render_type": "minecraft:cutout",
   "textures": {
-    "top": "build_previewer:block/access_block_top_on",
-    "bottom": "build_previewer:block/access_block_bottom",
-    "side": "build_previewer:block/access_block_side"
-  }
+    "base_side": "build_previewer:block/access_block_side",
+    "base_top": "build_previewer:block/access_block_top_on",
+    "base_bottom": "build_previewer:block/access_block_bottom",
+    "emissive_side": "build_previewer:block/access_block_side_e",
+    "emissive_top": "build_previewer:block/access_block_top_on_e",
+    "emissive_bottom": "build_previewer:block/access_block_bottom_e",
+    "particle": "build_previewer:block/access_block_side"
+  },
+  "elements": [
+    {
+      "name": "base_layer",
+      "from": [0, 0, 0],
+      "to": [16, 16, 16],
+      "faces": {
+        "down":  { "texture": "#base_bottom", "cullface": "down" },
+        "up":    { "texture": "#base_top", "cullface": "up" },
+        "north": { "texture": "#base_side", "cullface": "north" },
+        "south": { "texture": "#base_side", "cullface": "south" },
+        "west":  { "texture": "#base_side", "cullface": "west" },
+        "east":  { "texture": "#base_side", "cullface": "east" }
+      }
+    },
+    {
+      "name": "emissive_layer",
+      "from": [-0.01, -0.01, -0.01],
+      "to": [16.01, 16.01, 16.01],
+      "faces": {
+        "down":  { "texture": "#emissive_top", "cullface": "down", "forge_data": { "block_light": 15 } },
+        "up":    { "texture": "#emissive_top", "cullface": "up", "forge_data": { "block_light": 15 } },
+        "north": { "texture": "#emissive_side", "cullface": "north", "forge_data": { "block_light": 15 } },
+        "south": { "texture": "#emissive_side", "cullface": "south", "forge_data": { "block_light": 15 } },
+        "west":  { "texture": "#emissive_side", "cullface": "west", "forge_data": { "block_light": 15 } },
+        "east":  { "texture": "#emissive_side", "cullface": "east", "forge_data": { "block_light": 15 } }
+      }
+    }
+  ]
 }
