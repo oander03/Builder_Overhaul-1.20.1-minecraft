@@ -3,6 +3,7 @@ package net.hydroset.buildpreviewer.block;
 import net.hydroset.buildpreviewer.PreviewManager;
 import net.hydroset.buildpreviewer.block.entity.PreviewBlockEntity;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
@@ -16,6 +17,7 @@ import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.level.GameType;
 import net.minecraftforge.network.NetworkHooks;
@@ -23,19 +25,38 @@ import net.minecraftforge.network.NetworkHooks;
 import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.UUID;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
 
 import static net.hydroset.buildpreviewer.PreviewManager.pendingCommit;
 
 public class PreviewBlock extends Block implements EntityBlock {
 
+    // 1. Define the property
+    public static final BooleanProperty ACTIVE = BooleanProperty.create("active");
+
+
     public PreviewBlock(BlockBehaviour.Properties properties) {
         super(properties);
+        // 2. Set default state to off
+        this.registerDefaultState(this.stateDefinition.any().setValue(ACTIVE, false));
+    }
+
+    // 3. Register the property so Minecraft knows it exists
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        builder.add(ACTIVE);
     }
 
     @Nullable
     @Override
     public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
         return new PreviewBlockEntity(pos, state);
+    }
+
+
+    @Override
+    public boolean isOcclusionShapeFullBlock(BlockState state, BlockGetter world, BlockPos pos) {
+        return true; // Keeps the block solid, but allows us to layer effects
     }
 
     @Override
@@ -57,44 +78,28 @@ public class PreviewBlock extends Block implements EntityBlock {
     public float getDestroyProgress(BlockState state, Player player, BlockGetter level, BlockPos pos) {
         // Check if this specific block is currently an active anchor
         // Since this method runs on the Client too, we check our PreviewManager
-        if (PreviewManager.isInPreview(player.getUUID())) {
-            BlockPos anchorPos = PreviewManager.getAnchorPos(player.getUUID());
-            if (pos.equals(anchorPos)) {
-                return 0.0F; // 0% progress made, making it unbreakable
-            }
+        if (state.getValue(ACTIVE)) {
+            return 0.0F;
         }
-
-        // Check if ANYONE else is using it (for multiplayer)
-        for (BlockPos activeAnchor : PreviewManager.getAllAnchorPositions()) {
-            if (pos.equals(activeAnchor)) {
-                return 0.0F;
-            }
-        }
-
         return super.getDestroyProgress(state, player, level, pos);
     }
 
     @Override
     public void animateTick(BlockState state, Level level, BlockPos pos, net.minecraft.util.RandomSource random) {
         // Only show particles if the block is an active anchor
-        boolean isActive = false;
-        for (BlockPos anchor : PreviewManager.getAllAnchorPositions()) {
-            if (pos.equals(anchor)) {
-                isActive = true;
-                break;
-            }
-        }
+        if (state.getValue(ACTIVE)) {
 
-        if (isActive) {
-            if (random.nextInt(4) == 0) { // Only spawn occasionally
-                double x = pos.getX() + random.nextDouble();
-                double y = pos.getY() + 1.1D; // Just above the block
-                double z = pos.getZ() + random.nextDouble();
 
-                // Using END_ROD particles for a "magical build" look
-                level.addParticle(net.minecraft.core.particles.ParticleTypes.END_ROD,
-                        x, y, z, 0.0D, 0.05D, 0.0D);
-            }
+
+
+            double x = pos.getX() + 0.5D + (random.nextDouble() - 0.5D) * 2.0D;
+            double y = pos.getY() + 0.5D + (random.nextDouble() - 0.5D) * 2.0D;
+            double z = pos.getZ() + 0.5D + (random.nextDouble() - 0.5D) * 2.0D;
+
+            // 1. The "Heat" Core (Orange/Yellow)
+            level.addParticle(ParticleTypes.HAPPY_VILLAGER,
+                    x, y, z,
+                    0.0D, 0.06D, 0.0D);
         }
     }
     // Notice we added the 'snapshots' parameter here
@@ -111,6 +116,7 @@ public class PreviewBlock extends Block implements EntityBlock {
             player.displayClientMessage(Component.literal("§aBuild finalized!"), false);
         }
     }
+
 
     @Override
     public InteractionResult use(BlockState state, Level level, BlockPos pos,

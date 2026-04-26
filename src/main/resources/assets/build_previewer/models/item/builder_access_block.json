@@ -1,3 +1,3 @@
 {
-  "parent": "build_previewer:block/builder_access_block"
+  "parent": "build_previewer:block/access_block_off"
 }

@@ -234,11 +234,22 @@ public class PreviewEvents {
     public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             if (PreviewManager.isInPreview(player.getUUID())) {
+
+                // Get the anchor before we clear the manager data
+                BlockPos anchor = PreviewManager.getAnchorPos(player.getUUID());
+                Level level = player.level();
+
+                // 1. Force the texture and particles OFF immediately
+                if (anchor != null) {
+                    BlockState state = level.getBlockState(anchor);
+                    // Ensure we are actually looking at our PreviewBlock
+                    if (state.hasProperty(net.hydroset.buildpreviewer.block.PreviewBlock.ACTIVE)) {
+                        level.setBlock(anchor, state.setValue(net.hydroset.buildpreviewer.block.PreviewBlock.ACTIVE, false), 3);
+                    }
+                }
                 // Force exit logic
                 PreviewManager.exitPreview(player);
 
-                // Teleport them back to the anchor so they don't log back in mid-air
-                BlockPos anchor = PreviewManager.getAnchorPos(player.getUUID());
                 if (anchor != null) {
                     player.teleportTo(anchor.getX() + 0.5, anchor.getY() + 1.0, anchor.getZ() + 0.5);
                 }
@@ -251,6 +262,18 @@ public class PreviewEvents {
         if (event.getEntity() instanceof ServerPlayer player) {
             // 1. Get the world's default game mode (Creative, Survival, etc.)
             GameType defaultMode = player.getServer().getDefaultGameType();
+
+            BlockPos anchor = PreviewManager.getAnchorPos(player.getUUID());
+            Level level = player.level();
+
+            // 1. Force the texture and particles OFF immediately
+            if (anchor != null) {
+                BlockState state = level.getBlockState(anchor);
+                // Ensure we are actually looking at our PreviewBlock
+                if (state.hasProperty(net.hydroset.buildpreviewer.block.PreviewBlock.ACTIVE)) {
+                    level.setBlock(anchor, state.setValue(net.hydroset.buildpreviewer.block.PreviewBlock.ACTIVE, false), 3);
+                }
+            }
 
             // 2. If the world itself is a Creative world, we don't need to force anything.
             if (defaultMode == GameType.CREATIVE) return;

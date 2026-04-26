@@ -22,7 +22,14 @@ public class ModBlocks
             DeferredRegister.create(ForgeRegistries.BLOCKS, BuildPreviewer.MOD_ID);
 
     public static final RegistryObject<Block> BUILDACCESS_BLOCK = registerBlock("builder_access_block",
-            () -> new PreviewBlock(BlockBehaviour.Properties.copy(Blocks.IRON_BLOCK).sound(SoundType.AMETHYST)));
+            () -> new PreviewBlock(BlockBehaviour.Properties.copy(Blocks.IRON_BLOCK)
+                    .sound(SoundType.AMETHYST)
+                    // Use a lambda that correctly references the static ACTIVE property
+                    .lightLevel(state -> state.getValue(PreviewBlock.ACTIVE) ? 15 : 0)
+                    .hasPostProcess((state, pos, level) -> state.getValue(PreviewBlock.ACTIVE))
+                    .emissiveRendering((state, level, pos) -> true)
+                    .hasPostProcess((state, level, pos) -> true)
+            ));
 
     private static <T extends Block> RegistryObject<T> registerBlock(String name, Supplier<T> block) {
         RegistryObject<T> toReturn = BLOCKS.register(name, block);

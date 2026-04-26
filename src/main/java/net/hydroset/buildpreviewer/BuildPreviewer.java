@@ -8,6 +8,8 @@ import net.hydroset.buildpreviewer.networking.ModMessages;
 import net.hydroset.buildpreviewer.screen.ModMenuTypes;
 import net.hydroset.buildpreviewer.screen.PreviewScreen;
 import net.minecraft.client.gui.screens.MenuScreens;
+import net.minecraft.client.renderer.ItemBlockRenderTypes;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
@@ -53,6 +55,8 @@ public class BuildPreviewer
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);
 
+
+
         // Register our mod's ForgeConfigSpec so that Forge can create and load the config file for us
         // context.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
     }
@@ -62,11 +66,17 @@ public class BuildPreviewer
 
     }
 
-    // Inside the main class
+    // Update your existing clientSetup method to look like this:
     private void clientSetup(final FMLClientSetupEvent event) {
         event.enqueueWork(() -> {
             // This links the Menu to the Screen
             MenuScreens.register(ModMenuTypes.PREVIEW_MENU.get(), PreviewScreen::new);
+
+            // ADD THIS LINE:
+            // It allows the emissive texture (_e.png) to be rendered as an overlay
+            // This is the most common reason it fails.
+            // Ensure this points to the correct block in ModBlocks.
+            ItemBlockRenderTypes.setRenderLayer(ModBlocks.BUILDACCESS_BLOCK.get(), RenderType.cutout());
         });
     }
 

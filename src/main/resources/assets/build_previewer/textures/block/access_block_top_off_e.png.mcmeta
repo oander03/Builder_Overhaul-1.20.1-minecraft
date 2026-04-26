@@ -1,0 +1,7 @@
+{
+  "forge": {
+    "visibility": {
+      "use_emissive_light": true
+    }
+  }
+}

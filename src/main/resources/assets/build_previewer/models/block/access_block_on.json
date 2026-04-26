@@ -1,0 +1,9 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "render_type": "minecraft:cutout",
+  "textures": {
+    "top": "build_previewer:block/access_block_top_on",
+    "bottom": "build_previewer:block/access_block_bottom",
+    "side": "build_previewer:block/access_block_side"
+  }
+}

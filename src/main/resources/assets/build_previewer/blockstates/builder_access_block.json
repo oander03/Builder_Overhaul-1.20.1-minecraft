@@ -1,7 +1,10 @@
 {
   "variants": {
-    "": {
-      "model": "build_previewer:block/builder_access_block"
+    "active=false": {
+      "model": "build_previewer:block/access_block_off"
+    },
+    "active=true": {
+      "model": "build_previewer:block/access_block_on"
     }
   }
 }
