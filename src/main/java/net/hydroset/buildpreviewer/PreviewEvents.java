@@ -32,10 +32,7 @@ import net.minecraftforge.event.entity.player.AdvancementEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 
 
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 import static net.hydroset.buildpreviewer.PreviewManager.findSafeTeleportPos;
 
@@ -351,43 +348,39 @@ public class PreviewEvents {
 
     @SubscribeEvent
     public static void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
+        if (!(event.getEntity() instanceof Player player)) return;
+        UUID uuid = player.getUUID();
 
-        if (event.getEntity() instanceof Player player) {
-            UUID uuid = player.getUUID();
-
-            if (!PreviewManager.isInPreview(player.getUUID())) {
-                PreviewManager.recordChange(
-                        player.getUUID(),
-                        event.getPos(),
-                        event.getPlacedBlock()
-                );
+        // In onBlockPlace, non-preview branch:
+        if (!PreviewManager.isInPreview(uuid)) {
+            if (isRealPlayer(player)) { // ✅
+                PreviewManager.recordChange(uuid, event.getPos(), event.getPlacedBlock());
             }
+            return;
+        }
 
-            if (PreviewManager.isInPreview(uuid)) {
-                BlockPos pos = event.getPos();
-                // Get the snapshot of what was there BEFORE the placement
-                // We use level.getBlockState(pos) which should still be Air/OldBlock
-                BlockState stateBefore = event.getLevel().getBlockState(pos);
-                if (player instanceof ServerPlayer serverPlayer) {
-                    PreviewManager.syncLiveCostToAnchor(serverPlayer, null);                }
-                PreviewManager.recordChange(uuid, pos, stateBefore);
-
+        if (player instanceof ServerPlayer serverPlayer) {
+            // ✅ Retrieve the pre-placement state we stashed in onBeforePlace
+            BlockState stateBefore = pendingPlacementState.remove(uuid);
+            if (stateBefore == null) {
+                // Fallback — shouldn't happen but just in case
+                stateBefore = Blocks.AIR.defaultBlockState();
             }
-
+            PreviewManager.recordAndSync(serverPlayer, event.getPos(), stateBefore);
         }
     }
+
+    // Add this as a class field in PreviewEvents
+    private static final Map<UUID, BlockState> pendingPlacementState = new HashMap<>();
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onBeforePlace(PlayerInteractEvent.RightClickBlock event) {
         UUID uuid = event.getEntity().getUUID();
         if (PreviewManager.isInPreview(uuid)) {
-            // We look at the position the block WILL be placed in.
-            // If they click the TOP of a block, the new block goes at Pos + Up.
             BlockPos targetPos = event.getPos().relative(event.getFace());
             BlockState currentState = event.getLevel().getBlockState(targetPos);
-
-            // Record it now, before the placement happens
             PreviewManager.recordChange(uuid, targetPos, currentState);
+            pendingPlacementState.put(uuid, currentState); // ✅ stash it for onBlockPlace
         }
     }
 
@@ -425,18 +418,49 @@ public class PreviewEvents {
     }
 
     @SubscribeEvent
+    public static void onServerTick(net.minecraftforge.event.TickEvent.ServerTickEvent event) {
+        if (event.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
+
+        // Every 100 ticks (~5 seconds), force-save session state to disk
+        // so a crash can be recovered from
+        for (UUID uuid : PreviewManager.getAllActivePlayers()) {
+            BlockPos anchor = PreviewManager.getAnchorPos(uuid);
+            if (anchor == null) continue;
+
+            net.minecraft.server.MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+            if (server == null) continue;
+
+            // Find the player to get their level
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player == null) continue;
+
+            if (player.level().getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+                // Force a full disk save of the block entity
+                // This ensures buildSnapshots (with originalStates) is always up to date on disk
+                be.setChanged();
+            }
+        }
+    }
+
+    private static boolean isRealPlayer(Player player) {
+        return player instanceof ServerPlayer
+                && !(player instanceof net.minecraftforge.common.util.FakePlayer);
+    }
+
+    @SubscribeEvent
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
 
         Player player = event.getPlayer();
 
+        // ✅ Only record survival changes if a real player caused them
+        // Grass spreading, leaf decay etc. have a "fake" player — check it's a real ServerPlayer
+        // In onBlockBreak, non-preview branch:
         if (!PreviewManager.isInPreview(player.getUUID())) {
-            PreviewManager.recordChange(
-                    event.getPlayer().getUUID(),
-                    event.getPos(),
-                    net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()
-            );
+            if (isRealPlayer(player)) { // ✅
+                PreviewManager.recordChange(player.getUUID(), event.getPos(), Blocks.AIR.defaultBlockState());
+            }
+            return;
         }
-
 
         if (PreviewManager.isInPreview(player.getUUID())) {
 
@@ -505,8 +529,6 @@ public class PreviewEvents {
                 event.setCanceled(true);
                 event.getPlayer().displayClientMessage(Component.literal("§cThis block is currently locked in a Preview!"), true);
             }
-            if (player instanceof ServerPlayer serverPlayer) {
-                PreviewManager.syncLiveCostToAnchor(serverPlayer, event.getPos());            }
         }
     }
 

@@ -61,24 +61,25 @@ public class PreviewManager {
                 }
             }
         } else {
-            // If anyone breaks a block in the world in Survival,
-            // no preview should ever try to roll it back to a previous state.
             pendingCommit.forEach((uuid, map) -> {
-                if (!isInPreview(uuid)) {
-                    if (map.containsKey(pos)) {
-                        BuildSnapshot snapshot = map.get(pos);
+                // ✅ Only update snapshots for ACTIVE preview sessions
+                if (!isInPreview(uuid)) return;
 
-                        // If the block is broken in survival and becomes Air,
-                        // and the preview also wanted it to be Air, we can just remove it.
-                        if (currentStateAtPos.isAir() && snapshot.buildState.isAir()) {
-                            map.remove(pos);
-                        } else {
-                            // CRITICAL: Update the originalState to the NEW survival block.
-                            // If you replaced Stone with Wood, originalState is now Wood.
-                            // When you enter/exit preview later, it rolls back to Wood.
-                            snapshot.updateOriginalState(currentStateAtPos);
-                        }
-                    }
+                if (!map.containsKey(pos)) return;
+
+                BuildSnapshot snapshot = map.get(pos);
+
+                // ✅ If the world change matches what preview placed, this is a natural
+                // side-effect of preview building (grass->dirt, etc). Ignore it.
+                if (currentStateAtPos.equals(snapshot.buildState)) return;
+
+                // ✅ If the world change matches originalState, nothing really changed. Ignore.
+                if (currentStateAtPos.equals(snapshot.originalState)) return;
+
+                if (currentStateAtPos.isAir() && snapshot.buildState.isAir()) {
+                    map.remove(pos);
+                } else {
+                    snapshot.updateOriginalState(currentStateAtPos);
                 }
             });
         }
@@ -247,31 +248,37 @@ public class PreviewManager {
         // Do not put buildData.forEach here! It is outside the brackets, so the variables are 'red'.
     }
 
-    public static void syncLiveCostToAnchor(ServerPlayer player, BlockPos breakingPos) {
+    // Add to PreviewManager class fields
+    private static final Map<UUID, Long> lastSyncTime = new HashMap<>();
+    private static final long SYNC_INTERVAL_MS = 150;
+
+    public static void recordAndSync(ServerPlayer player, BlockPos placedPos, BlockState stateBefore) {
         UUID id = player.getUUID();
         BlockPos anchor = playerAnchorPos.get(id);
+        if (anchor == null) return;
 
-        if (anchor != null && player.level().getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
-            // 1. Get the current complex snapshot
+        Map<BlockPos, BlockState> changes = sessionChanges.computeIfAbsent(id, k -> new HashMap<>());
+        if (!changes.containsKey(placedPos)) {
+            changes.put(placedPos, stateBefore);
+        }
 
-
+        if (player.level().getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
             Map<BlockPos, BuildSnapshot> complexSnapshot = pendingCommit.computeIfAbsent(id, k -> new HashMap<>());
 
-            // 2. Sync session changes into it (so it knows about the blocks just placed/broken)
-            Map<BlockPos, BlockState> currentSession = sessionChanges.get(id);
-            if (currentSession != null) {
-                currentSession.forEach((pos, originalState) -> {
-                    BlockState currentState = player.level().getBlockState(pos);
-                    complexSnapshot.put(pos, new BuildSnapshot(originalState, currentState));
-                });
-            }
+            changes.forEach((pos, original) -> {
+                BlockState current = player.level().getBlockState(pos);
+                complexSnapshot.put(pos, new BuildSnapshot(original, current));
+            });
 
-            // 3. Recalculate and push to the Block Entity
-            Map<Item, Integer> liveCost = calculateRequiredItems(player, breakingPos);
+            Map<Item, Integer> liveCost = calculateRequiredItems(player, null);
             be.setRequiredItems(liveCost, id);
 
-            // 4. Force a network sync so the GUI/Overlay knows the data changed
-            be.updateBlock();
+            // ✅ Throttled sync — updates client dynamically but not on every single block spam
+            long now = System.currentTimeMillis();
+            if (now - lastSyncTime.getOrDefault(id, 0L) >= SYNC_INTERVAL_MS) {
+                lastSyncTime.put(id, now);
+                be.updateBlock();
+            }
         }
     }
 
@@ -306,6 +313,7 @@ public class PreviewManager {
         UUID id = player.getUUID();
         Level level = player.level();
         BlockPos anchor = playerAnchorPos.get(id);
+        lastSyncTime.remove(id);
 
         resetCache();
 
@@ -328,7 +336,9 @@ public class PreviewManager {
                     complexSnapshot.put(pos, new BuildSnapshot(originalState, currentState));
                 } else {
                     BuildSnapshot existing = complexSnapshot.get(pos);
-                    complexSnapshot.put(pos, new BuildSnapshot(existing.originalState, currentState));
+                    // ✅ Keep the original buildState from when the block was placed,
+                    // don't overwrite it with the current decayed world state
+                    complexSnapshot.put(pos, new BuildSnapshot(existing.originalState, existing.buildState));
                 }
             });
         }
@@ -345,19 +355,17 @@ public class PreviewManager {
             if (level.hasChunkAt(pos)) {
                 BlockState worldNow = level.getBlockState(pos);
 
-                // 1. Check if the block in the world has changed since we ENTERED preview
-                // (i.e., someone placed a block in Survival/World while we were previewing)
-                boolean worldChangedExternally = !worldNow.equals(snapshot.buildState);
+                // ✅ Always roll back if originalState is what we want to restore,
+                // regardless of whether the world changed naturally (grass->dirt etc.)
+                // Only skip rollback if something truly external happened that we don't own
+                boolean previewStillOwnsBlock = worldNow.equals(snapshot.buildState)
+                        || isNaturalDecayOf(worldNow, snapshot.buildState); // ✅ new helper
 
-                // 2. We only want to rollback if the block in the world is still our "Preview" block.
-                // If worldNow != snapshot.buildState, it means something else happened there,
-                // and we should update our 'originalState' so we don't overwrite the new block later.
-                if (worldChangedExternally) {
-                    // Update the snapshot so the "Memory" knows the world has a new reality
-                    snapshot.updateOriginalState(worldNow);
+                if (previewStillOwnsBlock) {
+                    level.setBlock(pos, snapshot.originalState, 2 | 16 | 128);
                 } else {
-                    // If the world still shows our preview block, roll it back to the original
-                    level.setBlock(pos, snapshot.originalState, 2 | 16 | 128);                }
+                    snapshot.updateOriginalState(worldNow);
+                }
             }
         });
         // 4. RESTORE PLAYER
@@ -381,6 +389,22 @@ public class PreviewManager {
 
         playerAnchorPos.remove(id);
 
+    }
+
+    // Returns true if 'current' is a natural decay/change of 'placed'
+// e.g. grass block naturally became dirt when something was placed on top
+    private static boolean isNaturalDecayOf(BlockState current, BlockState placed) {
+        // Grass -> Dirt
+        if (placed.is(Blocks.GRASS_BLOCK) && current.is(Blocks.DIRT)) return true;
+        // Mycelium -> Dirt
+        if (placed.is(Blocks.MYCELIUM) && current.is(Blocks.DIRT)) return true;
+        // Farmland -> Dirt (trampled)
+        if (placed.is(Blocks.FARMLAND) && current.is(Blocks.DIRT)) return true;
+        // Dirt Path -> Dirt (when covered)
+        if (placed.is(Blocks.DIRT_PATH) && current.is(Blocks.DIRT)) return true;
+        // Snow layer melting
+        if (placed.is(Blocks.SNOW) && current.is(Blocks.AIR)) return true;
+        return false;
     }
 
     public static boolean isInPreview(UUID id) {

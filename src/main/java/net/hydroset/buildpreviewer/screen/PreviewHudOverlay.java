@@ -202,4 +202,45 @@ public class PreviewHudOverlay {
             guiGraphics.pose().popPose();
         }
     }
+
+    @SubscribeEvent
+    public static void onScreenMouseClick(net.minecraftforge.client.event.ScreenEvent.MouseButtonPressed.Post event) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
+        if (!PreviewManager.isInPreview(mc.player.getUUID())) return;
+        if (!(event.getScreen() instanceof AbstractContainerScreen)) return;
+        if (cachedItemList.isEmpty()) return;
+
+        int mouseX = (int) event.getMouseX();
+        int mouseY = (int) event.getMouseY();
+
+        int screenHeight = mc.getWindow().getGuiScaledHeight();
+        int slotSize = 16;
+        int rowHeight = slotSize + 2;
+        int padding = 2;
+        int columnWidth = slotSize + padding;
+        int maxRows = (screenHeight - padding * 2) / rowHeight;
+
+        for (int i = 0; i < cachedItemList.size(); i++) {
+            int col = i / maxRows;
+            int row = i % maxRows;
+            int iconX = padding + col * columnWidth;
+            int iconY = padding + row * rowHeight;
+
+            if (mouseX >= iconX && mouseX < iconX + slotSize
+                    && mouseY >= iconY && mouseY < iconY + slotSize) {
+
+                BlockPos anchor = PreviewManager.getAnchorPos(mc.player.getUUID());
+                if (anchor == null) return;
+
+                Item clickedItem = cachedItemList.get(i).getKey();
+                net.hydroset.buildpreviewer.networking.ModMessages.sendToServer(
+                        new net.hydroset.buildpreviewer.networking.RemoveRequiredItemPacket(anchor, clickedItem)
+                );
+
+                lastRequirementsHash = 0; // force cache rebuild on next render
+                return;
+            }
+        }
+    }
 }
