@@ -1,6 +1,7 @@
 package net.hydroset.buildpreviewer;
 
 import net.hydroset.buildpreviewer.block.entity.PreviewBlockEntity;
+import net.minecraft.advancements.AdvancementProgress;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -31,6 +32,9 @@ import net.minecraftforge.event.level.PistonEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.event.entity.player.AdvancementEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+
 
 
 import java.util.List;
@@ -58,7 +62,20 @@ public class PreviewEvents {
             Items.BARRIER,
             Items.SPAWNER,
             Items.END_PORTAL_FRAME,
-            Items.SCULK_SHRIEKER
+            Items.SCULK_SHRIEKER,
+            Items.WITHER_SKELETON_SKULL,
+            Items.CARVED_PUMPKIN,
+            Items.NETHER_STAR,
+            //Items.POWDER_SNOW_BUCKET,
+            Items.ARMOR_STAND,
+            Items.ITEM_FRAME,
+            Items.GLOW_ITEM_FRAME,
+            Items.PAINTING,
+            Items.CHORUS_FRUIT,
+            Items.ENDER_PEARL,
+            Items.RESPAWN_ANCHOR,
+            Items.TNT,
+            Items.ENDER_EYE
     );
 
     private static final Set<net.minecraft.world.level.block.Block> BANNED_BLOCKS_TO_BREAK = Set.of(
@@ -69,7 +86,13 @@ public class PreviewEvents {
             Blocks.COMMAND_BLOCK,
             Blocks.CHAIN_COMMAND_BLOCK,
             Blocks.REPEATING_COMMAND_BLOCK,
-            Blocks.DRAGON_EGG
+            Blocks.DRAGON_EGG,
+            Blocks.REINFORCED_DEEPSLATE,
+            Blocks.STRUCTURE_BLOCK,
+            Blocks.JIGSAW,
+            Blocks.LIGHT,
+            Blocks.END_GATEWAY
+            //Blocks.TRIAL_SPAWNER
     );
 
     @SubscribeEvent
@@ -78,6 +101,30 @@ public class PreviewEvents {
             // This ensures that even if a block "pops" due to physics,
             // it doesn't leave an item behind to clutter the world.
             event.setExpToDrop(0);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onAdvancement(AdvancementEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            if (PreviewManager.isInPreview(player.getUUID())) {
+                // Access the server-side advancement tracker
+                net.minecraft.server.PlayerAdvancements advancements = player.getAdvancements();
+
+                // In 1.20.2+, use getAdvancementHolder()
+                // In older versions, use getAdvancement()
+                var advancement = event.getAdvancement();
+
+                net.minecraft.advancements.AdvancementProgress progress = advancements.getOrStartProgress(advancement);
+
+                if (progress.isDone()) {
+                    // If revokeCriterion is red, try revoke(advancement, criterion)
+                    // or ensure you are passing the correct Advancement object
+                    for (String criterion : progress.getCompletedCriteria()) {
+                        advancements.revoke(advancement, criterion);
+                    }
+                }
+            }
         }
     }
 

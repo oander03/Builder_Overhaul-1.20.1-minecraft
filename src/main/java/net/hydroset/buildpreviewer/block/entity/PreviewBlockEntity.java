@@ -320,7 +320,19 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         tag.put("RequiredItems", itemsTag);
         tag.putInt("RequiredItemsSize", i);
 
-        tag.put("Inventory", itemHandler.serializeNBT());
+        // Custom inventory save that handles counts > 127
+        ListTag inventoryList = new ListTag();
+        for (int j = 0; j < itemHandler.getSlots(); j++) {
+            ItemStack stack = itemHandler.getStackInSlot(j);
+            if (!stack.isEmpty()) {
+                CompoundTag slotTag = new CompoundTag();
+                slotTag.putInt("Slot", j);
+                slotTag.putString("Item", ForgeRegistries.ITEMS.getKey(stack.getItem()).toString());
+                slotTag.putInt("Count", stack.getCount()); // int, not byte!
+                inventoryList.add(slotTag);
+            }
+        }
+        tag.put("Inventory", inventoryList);
 
         if (ownerUUID != null) {
             tag.putUUID("Owner", ownerUUID);
@@ -368,7 +380,18 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
         // ADD THIS LINE: This puts the items back into the slots
         if (tag.contains("Inventory")) {
-            itemHandler.deserializeNBT(tag.getCompound("Inventory"));
+            ListTag inventoryList = tag.getList("Inventory", 10); // 10 = CompoundTag
+            for (int i = 0; i < inventoryList.size(); i++) {
+                CompoundTag slotTag = inventoryList.getCompound(i);
+                int slot = slotTag.getInt("Slot");
+                ResourceLocation itemId = new ResourceLocation(slotTag.getString("Item"));
+                Item item = ForgeRegistries.ITEMS.getValue(itemId);
+                int count = slotTag.getInt("Count"); // int, not byte!
+                if (item != null && item != Items.AIR && slot < itemHandler.getSlots()) {
+                    ItemStack stack = new ItemStack(item, count);
+                    itemHandler.setStackInSlot(slot, stack);
+                }
+            }
         }
 
         if (tag.hasUUID("Owner")) {

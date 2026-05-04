@@ -172,6 +172,7 @@ public class PreviewManager {
         UUID id = player.getUUID();
         Level level = player.level();
 
+
         BlockState state = level.getBlockState(pos);
         if (state.hasProperty(PreviewBlock.ACTIVE)) {
             level.setBlock(pos, state.setValue(PreviewBlock.ACTIVE, true), 18);
@@ -219,7 +220,7 @@ public class PreviewManager {
 
         restorePendingBuild(player); // Now safe to call
         player.setGameMode(GameType.CREATIVE);
-        player.displayClientMessage(Component.literal("§dEntering Build Mode"), true);
+        player.displayClientMessage(Component.literal("§aEntering Build Mode"), true);
     }
 
     private static void restorePendingBuild(ServerPlayer player) {
@@ -372,7 +373,7 @@ public class PreviewManager {
         playerAnchorPos.remove(id);
         previousGameModes.remove(id);
         // Note: We keep pendingCommit so the 'shopping list' stays visible on the BE screen!
-        player.displayClientMessage(Component.literal("§aExiting Build Mode"), true);
+        player.displayClientMessage(Component.literal("§dExiting Build Mode"), true);
 
         playerAnchorPos.remove(id);
 

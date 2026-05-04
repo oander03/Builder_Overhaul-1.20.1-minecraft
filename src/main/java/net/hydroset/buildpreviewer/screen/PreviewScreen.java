@@ -57,6 +57,9 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     private static final ResourceLocation TEXTURE =
             new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/preview_block_gui.png");
 
+    private static final ResourceLocation TEXTURE_SCROLL =
+            new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/preview_block_gui_scroll.png");
+
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         int direction = delta > 0 ? -1 : 1;
@@ -117,13 +120,15 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         int x = (width - imageWidth) / 2;
         int y = (height - imageHeight) / 2;
 
-        // 1. Draw Main Background
-        guiGraphics.blit(TEXTURE, x, y, 0, 0, imageWidth, imageHeight);
-
-        // 2. Logic for scrolling
+        // After:
         int totalItems = menu.getBlockEntity().getRequiredItems().size();
         int totalRows = (int) Math.ceil(totalItems / 9.0);
-        int maxScroll = Math.max(0, totalRows - 3);
+        boolean needsScroll = totalRows > 3;
+
+        ResourceLocation activeTex = needsScroll ? TEXTURE_SCROLL : TEXTURE;
+        guiGraphics.blit(activeTex, x, y, 0, 0, imageWidth, imageHeight);
+
+        int maxScroll = needsScroll ? totalRows - 3 : 0;
 
         int scrollBarX = x + 174;
         int scrollBarYTop = y + 18;
@@ -140,16 +145,11 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         int handleWidth = 6;
         int handleHeight = 27; // Increased to match your crop
 
-        if (maxScroll > 0) {
+        if (needsScroll) {
             float scrollFraction = (float) menu.scrollOffset / maxScroll;
-            // Adjust handleY calculation to account for the larger handle height
             int handleY = scrollBarYTop + (int) (scrollFraction * (scrollBarHeight - handleHeight));
-
-            // ACTIVE HANDLE (U=0)
             guiGraphics.blit(SCROLLER_TEXTURE, scrollBarX, handleY, 0.0F, 199.0F, handleWidth, handleHeight, textureWidth, textureHeight);
         } else {
-            // INACTIVE HANDLE (U=12)
-            // This shifts the U coordinate 12 pixels to the right to grab the second bar
             guiGraphics.blit(SCROLLER_TEXTURE, scrollBarX, scrollBarYTop, 12.0F, 199.0F, handleWidth, handleHeight, textureWidth, textureHeight);
         }
     }
@@ -208,7 +208,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             ItemStack stackInSlot = tempStacks[i];
 
 // Force the count to an Integer to prevent byte-wrapping glitches
-            int currentInSlot = (stackInSlot.is(reqItem)) ? (int)stackInSlot.getCount() : 0;
+            int currentInSlot = (stackInSlot.is(reqItem)) ? Math.max(0, stackInSlot.getCount()) : 0;
             int totalNeeded = cachedReqList.get(reqIndex).getValue();
             int remaining = totalNeeded - currentInSlot;
 
@@ -239,11 +239,24 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             RenderSystem.enableBlend();
 
             if (remaining > 0) {
-                // LAYER A: DARK OVERLAY (As long as we still need items)
-                // Color: 60% black (0x99000000)
-                guiGraphics.fill(x, y, x + 16, y + 16, 0x99000000);
+                float fillProgress = (totalNeeded > 0) ? (float) currentInSlot / totalNeeded : 0f;
 
-                RenderSystem.disableBlend(); // Temporarily disable blend for the text
+                int overlayColor;
+                if (fillProgress <= 0f) {
+                    // Zero progress: original dark overlay
+                    overlayColor = 0x99000000;
+                } else {
+                    // Any progress: interpolate from #523937 to #C9E91D
+                    float t = fillProgress;
+                    int r = (int)(0x52 + t * (0xC9 - 0x52)); // 82  -> 201
+                    int g = (int)(0x39 + t * (0xE9 - 0x39)); // 57  -> 233
+                    int b = (int)(0x37 + t * (0x1D - 0x37)); // 55  -> 29
+                    overlayColor = (0x99 << 24) | (r << 16) | (g << 8) | b;
+                }
+
+                RenderSystem.enableBlend();
+                guiGraphics.fill(x, y, x + 16, y + 16, overlayColor);
+                RenderSystem.disableBlend();
 
                 // --- DRAW TEXT LAYER (High Z-Index) ---
                 String text = String.valueOf(remaining);
