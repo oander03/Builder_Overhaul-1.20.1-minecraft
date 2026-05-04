@@ -1,6 +1,5 @@
 package net.hydroset.buildpreviewer.screen;
 
-import net.hydroset.buildpreviewer.PreviewManager;
 import net.hydroset.buildpreviewer.block.entity.PreviewBlockEntity;
 import net.hydroset.buildpreviewer.networking.ModMessages;
 import net.hydroset.buildpreviewer.networking.ServerboundScrollPacket;
@@ -13,13 +12,10 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-import net.minecraftforge.items.SlotItemHandler;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-
-import static java.awt.SystemColor.menu;
 
 public class PreviewMenu extends AbstractContainerMenu {
     private final PreviewBlockEntity blockEntity;
@@ -45,14 +41,6 @@ public class PreviewMenu extends AbstractContainerMenu {
         } else {
             // On server, broadcast changes so the client receives the updated item stacks for the new indices
             this.broadcastChanges();
-        }
-    }
-
-    private void updateSlotIndexes() {
-        for (int i = 0; i < 27; i++) {
-            if (this.slots.get(i) instanceof ScrollableSlot scrollSlot) {
-                scrollSlot.setIndex((scrollOffset * 9) + i);
-            }
         }
     }
 

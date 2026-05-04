@@ -7,13 +7,11 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
 import javax.annotation.Nullable;
@@ -85,24 +83,6 @@ public class PreviewManager {
         }
     }
 
-    public static void restoreBuildFromSave(UUID playerUUID, BlockPos entityPos) {
-        // Only restore if the manager doesn't already have them in memory
-        if (!pendingCommit.containsKey(playerUUID)) {
-
-            // 1. You need to get the list of blocks that were being previewed.
-            // If you saved the blueprint/schematic to the BlockEntity,
-            // you'd retrieve it here. For now, we'll tell the manager
-            // this player is "In Preview" again.
-
-            // Example: If your Toggle logic normally creates the list,
-            // you might call a shared method here:
-            // List<BlockPos> blueprint = calculateBlueprint(entityPos);
-            // pendingCommit.put(playerUUID, blueprint);
-
-            System.out.println("Restored preview session for: " + playerUUID);
-        }
-    }
-
     // Update your calculator to handle the "Future" Air block
     public static Map<Item, Integer> calculateRequiredItems(ServerPlayer player, @Nullable BlockPos pendingAir) {
         UUID id = player.getUUID();
@@ -124,19 +104,6 @@ public class PreviewManager {
             }
         });
         return requirements;
-    }
-
-    public static void rollbackWorld(ServerPlayer player) {
-        UUID id = player.getUUID();
-        // We get the original session changes before they are cleared
-        Map<BlockPos, BlockState> changes = sessionChanges.get(id);
-
-        if (changes != null) {
-            Level level = player.level();
-            changes.forEach((pos, originalState) -> {
-                level.setBlock(pos, originalState, 3 | 16);
-            });
-        }
     }
 
     public static void startInventoryPreview(ServerPlayer player) {
@@ -441,18 +408,6 @@ public class PreviewManager {
 
         // 3. Absolute fallback: just one block up
         return startPos.above();
-    }
-
-    public static void updateAnchorCost(ServerPlayer player, Map<Item, Integer> cost) {
-        BlockPos anchor = playerAnchorPos.get(player.getUUID());
-        if (anchor == null) {
-            // If they aren't in preview, we check the last known anchor if you store it,
-            // or iterate to find the PreviewBlockEntity they are using.
-        }
-
-        if (anchor != null && player.level().getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
-            be.setRequiredItems(cost, player.getUUID());
-        }
     }
 
     public static Collection<BlockPos> getAllAnchorPositions() {

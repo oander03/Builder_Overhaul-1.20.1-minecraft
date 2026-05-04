@@ -2,7 +2,6 @@ package net.hydroset.buildpreviewer.block.entity;
 
 import net.hydroset.buildpreviewer.PreviewManager;
 import net.hydroset.buildpreviewer.block.PreviewBlock;
-import net.hydroset.buildpreviewer.block.entity.ModBlockEntities;
 import net.hydroset.buildpreviewer.screen.PreviewMenu;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -17,7 +16,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Containers;
 import net.minecraft.world.MenuProvider;
-import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -242,23 +240,6 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         return this.requiredItems;
     }
 
-    private void consumeRequiredItems() {
-        for (Map.Entry<Item, Integer> entry : requiredItems.entrySet()) {
-            int toTake = entry.getValue();
-            for (int i = 0; i < itemHandler.getSlots(); i++) {
-                ItemStack stack = itemHandler.getStackInSlot(i);
-                if (stack.is(entry.getKey())) {
-                    int shrinkBy = Math.min(stack.getCount(), toTake);
-                    // Use itemHandler.extractItem to ensure the handler knows it changed
-                    itemHandler.extractItem(i, shrinkBy, false);
-                    toTake -= shrinkBy;
-                }
-                if (toTake <= 0) break;
-            }
-        }
-        this.setChanged();
-    }
-
     public void drops() {
         if (this.level == null) return;
 
@@ -293,6 +274,8 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         this.ownerUUID = owner;
         this.setChanged();
     }
+
+
 
     private void saveBuildSnapshots(CompoundTag tag) {
         ListTag snapshotList = new ListTag();

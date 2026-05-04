@@ -2,7 +2,6 @@ package net.hydroset.buildpreviewer.block;
 
 import net.hydroset.buildpreviewer.BuildPreviewer;
 import net.hydroset.buildpreviewer.item.ModItems;
-import net.hydroset.buildpreviewer.block.PreviewBlock;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;

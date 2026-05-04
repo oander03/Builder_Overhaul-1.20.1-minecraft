@@ -442,6 +442,8 @@ public class PreviewEvents {
         }
     }
 
+
+
     private static boolean isRealPlayer(Player player) {
         return player instanceof ServerPlayer
                 && !(player instanceof net.minecraftforge.common.util.FakePlayer);

@@ -19,15 +19,12 @@ import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.level.GameType;
 import net.minecraftforge.network.NetworkHooks;
 
 import javax.annotation.Nullable;
 import java.util.Map;
-import java.util.UUID;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 
-import static net.hydroset.buildpreviewer.PreviewManager.pendingCommit;
 
 public class PreviewBlock extends Block implements EntityBlock {
 
