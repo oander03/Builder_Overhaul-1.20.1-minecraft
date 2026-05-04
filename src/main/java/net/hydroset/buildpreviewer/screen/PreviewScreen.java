@@ -286,7 +286,29 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             RenderSystem.disableBlend(); // Final blend disable
         }
 
-        // 6. Finally, render the tooltips over everything else
+// 6. Finally, render the tooltips over everything else
+// --- CUSTOM GHOST TOOLTIP ---
+        for (int i = 0; i < 27; i++) {
+            Slot slot = this.menu.slots.get(i);
+            int reqIndex = slot.getSlotIndex();
+
+            if (reqIndex >= cachedReqList.size()) continue;
+
+            int x = this.leftPos + slot.x;
+            int y = this.topPos + slot.y;
+
+            // Check if mouse is hovering this slot
+            if (mouseX >= x && mouseX < x + 16 && mouseY >= y && mouseY < y + 16) {
+                Item reqItem = cachedReqList.get(reqIndex).getKey();
+                ItemStack stackInSlot = tempStacks[i];
+
+                // Only show ghost tooltip if the slot is empty (no real item to show tooltip for)
+                if (stackInSlot.isEmpty()) {
+                    guiGraphics.renderTooltip(this.font, new ItemStack(reqItem), mouseX, mouseY);
+                }
+            }
+        }
+
         renderTooltip(guiGraphics, mouseX, mouseY);
     }
 

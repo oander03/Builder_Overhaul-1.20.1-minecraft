@@ -47,11 +47,19 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
     private final ItemStackHandler itemHandler = new ItemStackHandler(108) {
 
+        private long lastSyncTime = 0;
+        private static final long SYNC_INTERVAL_MS = 500; // sync at most 2x per second
+
         @Override
         protected void onContentsChanged(int slot) {
-            setChanged();
+            setChanged(); // Always mark dirty for saving — this is fine
+
             if (level != null && !level.isClientSide) {
-                level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+                long now = System.currentTimeMillis();
+                if (now - lastSyncTime >= SYNC_INTERVAL_MS) {
+                    lastSyncTime = now;
+                    level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+                }
             }
         }
 
@@ -106,13 +114,6 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         return ClientboundBlockEntityDataPacket.create(this);
     }
 
-    // This prepares the data to be sent to the client
-    @Override
-    public @NotNull CompoundTag getUpdateTag() {
-        CompoundTag nbt = super.getUpdateTag();
-        saveAdditional(nbt); // This ensures the Inventory and RequiredItems are included
-        return nbt;
-    }
 
     @Override
     public void invalidateCaps() {
@@ -293,10 +294,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         this.setChanged();
     }
 
-    @Override
-    protected void saveAdditional(CompoundTag tag) {
-        super.saveAdditional(tag);
-
+    private void saveBuildSnapshots(CompoundTag tag) {
         ListTag snapshotList = new ListTag();
         for (Map.Entry<BlockPos, PreviewManager.BuildSnapshot> entry : buildSnapshots.entrySet()) {
             CompoundTag entryTag = new CompoundTag();
@@ -306,21 +304,31 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
             snapshotList.add(entryTag);
         }
         tag.put("BuildSnapshots", snapshotList);
-        // Save the required items map
-        CompoundTag itemsTag = new CompoundTag();
-        int i = 0;
-        for (Map.Entry<Item, Integer> entry : requiredItems.entrySet()) {
-            CompoundTag entryTag = new CompoundTag();
-            // Save the Registry Name of the item (e.g., "minecraft:stone")
-            entryTag.putString("item", ForgeRegistries.ITEMS.getKey(entry.getKey()).toString());
-            entryTag.putInt("count", entry.getValue());
-            itemsTag.put("item_" + i, entryTag);
-            i++;
-        }
-        tag.put("RequiredItems", itemsTag);
-        tag.putInt("RequiredItemsSize", i);
+    }
 
-        // Custom inventory save that handles counts > 127
+    // Full save to disk — everything
+    @Override
+    protected void saveAdditional(CompoundTag tag) {
+        super.saveAdditional(tag);
+        saveInventory(tag);
+        saveRequiredItems(tag);
+        saveBuildSnapshots(tag); // expensive, but only for disk
+        if (ownerUUID != null) tag.putUUID("Owner", ownerUUID);
+    }
+
+    // Lightweight client sync — skip build snapshots entirely
+    @Override
+    public @NotNull CompoundTag getUpdateTag() {
+        CompoundTag nbt = new CompoundTag();
+        saveInventory(nbt);
+        saveRequiredItems(nbt);
+        if (ownerUUID != null) nbt.putUUID("Owner", ownerUUID);
+        // DO NOT include BuildSnapshots here — client doesn't need them for the HUD
+        return nbt;
+    }
+
+    // Extract these into helper methods
+    private void saveInventory(CompoundTag tag) {
         ListTag inventoryList = new ListTag();
         for (int j = 0; j < itemHandler.getSlots(); j++) {
             ItemStack stack = itemHandler.getStackInSlot(j);
@@ -328,16 +336,27 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
                 CompoundTag slotTag = new CompoundTag();
                 slotTag.putInt("Slot", j);
                 slotTag.putString("Item", ForgeRegistries.ITEMS.getKey(stack.getItem()).toString());
-                slotTag.putInt("Count", stack.getCount()); // int, not byte!
+                slotTag.putInt("Count", stack.getCount());
                 inventoryList.add(slotTag);
             }
         }
         tag.put("Inventory", inventoryList);
-
-        if (ownerUUID != null) {
-            tag.putUUID("Owner", ownerUUID);
-        }
     }
+
+    private void saveRequiredItems(CompoundTag tag) {
+        CompoundTag itemsTag = new CompoundTag();
+        int i = 0;
+        for (Map.Entry<Item, Integer> entry : requiredItems.entrySet()) {
+            CompoundTag entryTag = new CompoundTag();
+            entryTag.putString("item", ForgeRegistries.ITEMS.getKey(entry.getKey()).toString());
+            entryTag.putInt("count", entry.getValue());
+            itemsTag.put("item_" + i, entryTag);
+            i++;
+        }
+        tag.put("RequiredItems", itemsTag);
+        tag.putInt("RequiredItemsSize", i);
+    }
+
     @Override
     public void load(CompoundTag tag) {
         super.load(tag);
@@ -350,6 +369,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
                 net.minecraft.core.registries.BuiltInRegistries.BLOCK.asLookup();
 
         if (tag.contains("BuildSnapshots")) {
+            this.buildSnapshots.clear();
             ListTag snapshotList = tag.getList("BuildSnapshots", 10);
             for (int i = 0; i < snapshotList.size(); i++) {
                 CompoundTag entryTag = snapshotList.getCompound(i);
@@ -365,6 +385,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
         // Load your Required Items
         if (tag.contains("RequiredItems")) {
+            this.requiredItems.clear();
             CompoundTag itemsTag = tag.getCompound("RequiredItems");
             int size = tag.getInt("RequiredItemsSize");
             for (int i = 0; i < size; i++) {

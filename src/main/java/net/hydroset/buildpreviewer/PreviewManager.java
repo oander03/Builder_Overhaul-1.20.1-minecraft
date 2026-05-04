@@ -19,6 +19,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import javax.annotation.Nullable;
 import java.util.*;
 
+import static net.hydroset.buildpreviewer.screen.PreviewHudOverlay.resetCache;
+
 
 public class PreviewManager {
 
@@ -304,6 +306,8 @@ public class PreviewManager {
         UUID id = player.getUUID();
         Level level = player.level();
         BlockPos anchor = playerAnchorPos.get(id);
+
+        resetCache();
 
         Map<BlockPos, BlockState> currentSession = sessionChanges.get(id);
         Map<BlockPos, BuildSnapshot> complexSnapshot = pendingCommit.computeIfAbsent(id, k -> new HashMap<>());
