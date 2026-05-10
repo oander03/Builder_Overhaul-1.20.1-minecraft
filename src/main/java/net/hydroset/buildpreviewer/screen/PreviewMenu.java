@@ -21,12 +21,15 @@ public class PreviewMenu extends AbstractContainerMenu {
     private final PreviewBlockEntity blockEntity;
 
     public int scrollOffset = 0;
+    public float smoothScrollOffset = 0f;
+    public int targetScrollOffset = 0;
 
     public void scrollTo(int newOffset) {
         int totalItems = blockEntity.getRequiredItems().size();
         int totalRows = (int) Math.ceil(totalItems / 9.0);
         int maxScroll = Math.max(0, totalRows - 3);
-        this.scrollOffset = Math.max(0, Math.min(newOffset, maxScroll));
+        this.targetScrollOffset = Math.max(0, Math.min(newOffset, maxScroll));
+        this.scrollOffset = this.targetScrollOffset; // slots still snap to integer
 
         // 1. Update the slots to point to the new part of the inventory
         for (int i = 0; i < 27; i++) {
@@ -43,6 +46,8 @@ public class PreviewMenu extends AbstractContainerMenu {
             this.broadcastChanges();
         }
     }
+
+
 
 
     // Client-side constructor
