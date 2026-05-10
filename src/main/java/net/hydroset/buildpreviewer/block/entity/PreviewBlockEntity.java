@@ -95,7 +95,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
     @Override
     public Component getDisplayName() {
-        return Component.literal("Build Previewer");
+        return Component.literal("REQUIRED ITEMS");
     }
 
 

@@ -7,6 +7,7 @@ import net.hydroset.buildpreviewer.networking.ModMessages;
 import net.hydroset.buildpreviewer.networking.TogglePreviewPacket;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.network.chat.Component;
@@ -518,48 +519,68 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         renderTooltip(guiGraphics, mouseX, mouseY);
     }
 
+    private Button toggleButton;
+    private Button finalizeButton;
+
+
     @Override
     protected void init() {
         super.init();
         net.minecraft.core.BlockPos pos = this.menu.getBlockEntity().getBlockPos();
-
-        // Standard GUI width is 176.
-        // We'll use two buttons that are 80 pixels wide each.
-        int buttonWidth = 80;
-        int spacing = 4; // Small gap between them
+        
 
         slotBubbles.clear();
         for (int i = 0; i < 27; i++) {
             slotBubbles.add(new ArrayList<>());
         }
-        // Calculate the starting X so the group of two is centered
-        // (Total width of both buttons + gap is 164)
-        int totalWidth = (buttonWidth * 2) + spacing;
-        int startX = this.leftPos + (this.imageWidth / 2) - (totalWidth / 2);
 
-        // Position them about 25 pixels above the GUI
+        int finalizeWidth = 70;
+        int toggleWidth = 94;
+        int spacing = 4;
+
+        int totalWidth = finalizeWidth + toggleWidth + spacing;
+        int startX = this.leftPos + (this.imageWidth / 2) - (totalWidth / 2);
         int buttonY = this.topPos - 25;
 
-        // 1. Finalize Build Button (Left side)
-        Button finalizeButton = Button.builder(Component.literal("Finalize"), (button) -> {
+// 1. Finalize Button
+        this.finalizeButton = Button.builder(Component.literal("♦ Finalize"), (button) -> {
                     ModMessages.sendToServer(new FinalizeBuildPacket(pos));
                 })
-                .bounds(startX, buttonY, buttonWidth, 20)
+                .bounds(startX, buttonY, finalizeWidth, 20)
+                .tooltip(Tooltip.create(Component.literal("Commit the blueprint and place all blocks into the world.")))
                 .build();
+        this.finalizeButton.active = !net.hydroset.buildpreviewer.PreviewManager.isInPreview(this.minecraft.player.getUUID());
+        this.addRenderableWidget(this.finalizeButton);
 
-        // Set active status: Only active if NOT in preview mode
-        // Note: You might need to check this on the client-side PreviewManager
-        // or pass the state through the ContainerMenu.
-        finalizeButton.active = !net.hydroset.buildpreviewer.PreviewManager.isInPreview(this.minecraft.player.getUUID());
+// 2. Toggle Button
+        boolean inPreview = net.hydroset.buildpreviewer.PreviewManager.isInPreview(this.minecraft.player.getUUID());
+        this.toggleButton = Button.builder(
+                        inPreview ? Component.literal("⛏ Exit Builder") : Component.literal("⛏ Enter Builder"),
+                        (button) -> {
+                            ModMessages.sendToServer(new TogglePreviewPacket(pos));
+                            this.onClose();
+                        })
+                .bounds(startX + finalizeWidth + spacing, buttonY, toggleWidth, 20)
+                .tooltip(inPreview
+                        ? Tooltip.create(Component.literal("Exit and return world back to normal."))
+                        : Tooltip.create(Component.literal("Go into a creative builder mode to build a blueprint.")))
+                .build();
+        this.addRenderableWidget(this.toggleButton);
+    }
 
-        this.addRenderableWidget(finalizeButton);
+    @Override
+    public void containerTick() {
+        super.containerTick();
+        if (this.minecraft == null || this.minecraft.player == null || this.toggleButton == null) return;
 
-        // 2. Toggle Preview Button (Right side)
-        this.addRenderableWidget(Button.builder(Component.literal("Toggle"), (button) -> {
-                    ModMessages.sendToServer(new TogglePreviewPacket(pos));
-                    this.onClose();
-        })
-        .bounds(startX + buttonWidth + spacing, buttonY, buttonWidth, 20)
-        .build());
+        boolean inPreview = net.hydroset.buildpreviewer.PreviewManager.isInPreview(this.minecraft.player.getUUID());
+
+        this.toggleButton.setMessage(
+                inPreview ? Component.literal("⛏ Exit Builder") : Component.literal("⛏ Enter Builder")
+        );
+        this.toggleButton.setTooltip(inPreview
+                ? Tooltip.create(Component.literal("Exit and return world back to normal."))
+                : Tooltip.create(Component.literal("Go into a creative builder mode to build a blueprint."))
+        );
     }
 }

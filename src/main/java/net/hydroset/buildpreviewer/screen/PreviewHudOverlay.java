@@ -30,6 +30,12 @@ public class PreviewHudOverlay {
     private static long lastCountUpdate = 0;
     private static Map<Item, Integer> cachedIndexMap = new HashMap<>();
 
+    // HUD button state
+    private static int hudBtnExitX, hudBtnExitY, hudBtnExitW = 90, hudBtnExitH = 14;
+    private static int hudBtnPlaceholderX, hudBtnPlaceholderY, hudBtnPlaceholderW = 90, hudBtnPlaceholderH = 14;
+    private static boolean hudBtnExitHovered = false;
+    private static boolean hudBtnPlaceholderHovered = false;
+
     private static void updateCache(Map<Item, Integer> requiredItems) {
         int hash = requiredItems.hashCode();
         if (hash == lastRequirementsHash) return;
@@ -95,8 +101,9 @@ public class PreviewHudOverlay {
         int mouseY = (int)(mc.mouseHandler.ypos() * mc.getWindow().getGuiScaledHeight() / mc.getWindow().getScreenHeight());
 
         renderHud(event.getGuiGraphics(), mc, previewBE, mouseX, mouseY);
+        renderHudButtons(event.getGuiGraphics(), mc, mouseX, mouseY);   // ← new
 
-        // Tooltip
+        // Tooltip for item icons
         if (cachedItemList.isEmpty()) return;
         int screenHeight = mc.getWindow().getGuiScaledHeight();
         int slotSize = 16;
@@ -116,6 +123,69 @@ public class PreviewHudOverlay {
                 break;
             }
         }
+    }
+
+    private static void renderHudButtons(GuiGraphics guiGraphics, Minecraft mc, int mouseX, int mouseY) {
+        int screenW = mc.getWindow().getGuiScaledWidth();
+        int screenH = mc.getWindow().getGuiScaledHeight();
+
+        int margin = 6;
+        int btnGap = 3;
+
+        // Anchor both buttons to bottom-right
+        hudBtnExitW = 90; hudBtnExitH = 14;
+        hudBtnPlaceholderW = 90; hudBtnPlaceholderH = 14;
+
+        hudBtnExitX = screenW - hudBtnExitW - margin;
+        hudBtnExitY = screenH - hudBtnExitH - margin;
+        hudBtnPlaceholderX = screenW - hudBtnPlaceholderW - margin;
+        hudBtnPlaceholderY = hudBtnExitY - hudBtnPlaceholderH - btnGap;
+
+        hudBtnExitHovered = mouseX >= hudBtnExitX && mouseX < hudBtnExitX + hudBtnExitW
+                && mouseY >= hudBtnExitY && mouseY < hudBtnExitY + hudBtnExitH;
+        hudBtnPlaceholderHovered = mouseX >= hudBtnPlaceholderX && mouseX < hudBtnPlaceholderX + hudBtnPlaceholderW
+                && mouseY >= hudBtnPlaceholderY && mouseY < hudBtnPlaceholderY + hudBtnPlaceholderH;
+
+        RenderSystem.enableBlend();
+
+        // Exit Preview button
+        drawHudButton(guiGraphics, mc, hudBtnExitX, hudBtnExitY, hudBtnExitW, hudBtnExitH,
+                "⛏ Exit Preview", hudBtnExitHovered,
+                0xCC3A2410, 0xCC5A3E2B, 0xFFFFEECC, 0xFF6B4C2A);   // warm brown — matches titlebar
+
+        // Placeholder button
+        drawHudButton(guiGraphics, mc, hudBtnPlaceholderX, hudBtnPlaceholderY, hudBtnPlaceholderW, hudBtnPlaceholderH,
+                "✦ (Placeholder)", hudBtnPlaceholderHovered,
+                0xCC1A2A1A, 0xCC2A4A2A, 0xFFAAEEAA, 0xFF3A6A3A);   // muted green
+
+        RenderSystem.disableBlend();
+    }
+
+    private static void drawHudButton(GuiGraphics guiGraphics, Minecraft mc,
+                                      int x, int y, int w, int h,
+                                      String label, boolean hovered,
+                                      int bgDark, int bgLight, int textColor, int borderColor) {
+
+        int bg = hovered ? bgLight : bgDark;
+
+        // Background fill
+        guiGraphics.fill(x, y, x + w, y + h, bg);
+
+        // 1px border — top/left lighter, bottom/right darker (classic MC bevel)
+        int borderBright = borderColor;
+        int borderShadow = borderColor & 0xFF000000 | ((borderColor & 0x00FEFEFE) >> 1); // half-brightness
+        guiGraphics.fill(x,         y,         x + w,     y + 1,     borderBright); // top
+        guiGraphics.fill(x,         y,         x + 1,     y + h,     borderBright); // left
+        guiGraphics.fill(x,         y + h - 1, x + w,     y + h,     borderShadow); // bottom
+        guiGraphics.fill(x + w - 1, y,         x + w,     y + h,     borderShadow); // right
+
+        // Centered label
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0, 0, 300.0f);
+        int textX = x + (w - mc.font.width(label)) / 2;
+        int textY = y + (h - mc.font.lineHeight) / 2 + 1;
+        guiGraphics.drawString(mc.font, label, textX, textY, textColor, true);
+        guiGraphics.pose().popPose();
     }
 
     private static void renderHud(GuiGraphics guiGraphics, Minecraft mc, PreviewBlockEntity previewBE, int mouseX, int mouseY) {
@@ -208,10 +278,31 @@ public class PreviewHudOverlay {
         if (mc.player == null || mc.level == null) return;
         if (!PreviewManager.isInPreview(mc.player.getUUID())) return;
         if (!(event.getScreen() instanceof AbstractContainerScreen)) return;
-        if (cachedItemList.isEmpty()) return;
 
         int mouseX = (int) event.getMouseX();
         int mouseY = (int) event.getMouseY();
+
+        // --- HUD BUTTON CLICKS ---
+        if (mouseX >= hudBtnExitX && mouseX < hudBtnExitX + hudBtnExitW
+                && mouseY >= hudBtnExitY && mouseY < hudBtnExitY + hudBtnExitH) {
+            BlockPos anchor = PreviewManager.getAnchorPos(mc.player.getUUID());
+            if (anchor != null) {
+                net.hydroset.buildpreviewer.networking.ModMessages.sendToServer(
+                        new net.hydroset.buildpreviewer.networking.TogglePreviewPacket(anchor));
+                mc.player.closeContainer();
+            }
+            return;
+        }
+
+        if (mouseX >= hudBtnPlaceholderX && mouseX < hudBtnPlaceholderX + hudBtnPlaceholderW
+                && mouseY >= hudBtnPlaceholderY && mouseY < hudBtnPlaceholderY + hudBtnPlaceholderH) {
+            // Placeholder action — replace with whatever you need later
+            mc.player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§e(Placeholder button pressed)"));
+            return;
+        }
+
+        // --- existing item-icon click loop below, unchanged ---
+        if (cachedItemList.isEmpty()) return;
 
         int screenHeight = mc.getWindow().getGuiScaledHeight();
         int slotSize = 16;
