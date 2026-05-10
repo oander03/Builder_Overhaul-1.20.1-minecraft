@@ -256,26 +256,26 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
                 // --- DRAW TEXT LAYER (High Z-Index) ---
                 String text = String.valueOf(remaining);
                 guiGraphics.pose().pushPose();
-
-                // Move the text to the absolute front (Z=250)
                 guiGraphics.pose().translate(0, 0, 250.0f);
-
                 int textX = x + 17 - this.font.width(text);
                 int textY = y + 9;
-
-                // Draw with shadow (true) for better readability
-                guiGraphics.drawString(this.font, text, textX, textY, 0xFFFFFF, true);
-
+                guiGraphics.drawString(this.font, text, textX, textY, 0xFF5555, true); // red
                 guiGraphics.pose().popPose();
 
                 // Re-enable blend for any subsequent overlaps
                 RenderSystem.enableBlend();
 
             } else if (!stackInSlot.isEmpty() && currentInSlot >= totalNeeded) {
-                // THE NEW LAYER: GREEN OVERLAY (After cost is fully met)
-                // Color: 50% opacity Green (0x8000FF00)
-                // (Only draw if there's actually an item in the slot)
                 guiGraphics.fill(x, y, x + 16, y + 16, 0x8000FF00);
+
+                // Draw green checkmark
+                String check = "✔";
+                guiGraphics.pose().pushPose();
+                guiGraphics.pose().translate(0, 0, 250.0f);
+                int checkX = x + 17 - this.font.width(check);
+                int checkY = y + 9;
+                guiGraphics.drawString(this.font, check, checkX, checkY, 0x55FF55, true);
+                guiGraphics.pose().popPose();
             }
 
             RenderSystem.disableBlend(); // Final blend disable
