@@ -157,6 +157,9 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         super.renderLabels(guiGraphics, mouseX, mouseY);
     }
 
+    // Animated fill progress per slot (smoothly lerps toward real value)
+    private float[] animatedFill = new float[27];
+
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float delta) {
         // 1. Draw the dark background tint
@@ -231,44 +234,64 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             }
 
             // --- DRAW OVERLAYS ---
+            float targetFill = (totalNeeded > 0) ? (float) currentInSlot / totalNeeded : 0f;
+// Lerp speed: 0.04f feels like slow water fill; increase for faster
+            float lerpSpeed = 0.03f;
+            if (animatedFill[i] < targetFill) {
+                animatedFill[i] = Math.min(targetFill, animatedFill[i] + lerpSpeed);
+            } else if (animatedFill[i] > targetFill) {
+                // Snap down immediately when items are removed (feels more responsive)
+                animatedFill[i] = targetFill;
+            }
+            float fillProgress = animatedFill[i];
+
+// --- DRAW OVERLAYS ---
             RenderSystem.enableBlend();
 
-            if (remaining > 0) {
-                float fillProgress = (totalNeeded > 0) ? (float) currentInSlot / totalNeeded : 0f;
-
+            if (remaining > 0 || fillProgress < 1.0f) {
                 int overlayColor;
                 if (fillProgress <= 0f) {
-                    // Zero progress: original dark overlay
-                    overlayColor = 0x99000000;
+                    overlayColor = 0x99000000; // dark, empty
                 } else {
-                    // Any progress: interpolate from #523937 to #C9E91D
                     float t = fillProgress;
-                    int r = (int)(0x52 + t * (0xC9 - 0x52)); // 82  -> 201
-                    int g = (int)(0x39 + t * (0xE9 - 0x39)); // 57  -> 233
-                    int b = (int)(0x37 + t * (0x1D - 0x37)); // 55  -> 29
+                    int r = (int)(0x52 + t * (0xC9 - 0x52));
+                    int g = (int)(0x39 + t * (0xE9 - 0x39));
+                    int b = (int)(0x37 + t * (0x1D - 0x37));
                     overlayColor = (0x99 << 24) | (r << 16) | (g << 8) | b;
                 }
 
-                RenderSystem.enableBlend();
-                guiGraphics.fill(x, y, x + 16, y + 16, overlayColor);
-                RenderSystem.disableBlend();
+                // --- WATER FILL EFFECT ---
+                // Instead of filling the whole slot, fill from the bottom up
+                int slotBottom = y + 16;
+                int fillHeight = (int)(fillProgress * 16);
+                int fillTop = slotBottom - fillHeight;
 
-                // --- DRAW TEXT LAYER (High Z-Index) ---
+                // Draw dark overlay on the unfilled top portion
+                if (fillTop > y) {
+                    guiGraphics.fill(x, y, x + 16, fillTop, 0x99000000);
+                }
+                // Draw colored overlay on the filled bottom portion
+                if (fillHeight > 0) {
+                    guiGraphics.fill(x, fillTop, x + 16, slotBottom, overlayColor);
+                }
+
+                RenderSystem.enableBlend();
+
+                // --- DRAW TEXT ---
                 String text = String.valueOf(remaining);
                 guiGraphics.pose().pushPose();
                 guiGraphics.pose().translate(0, 0, 250.0f);
                 int textX = x + 17 - this.font.width(text);
                 int textY = y + 9;
-                guiGraphics.drawString(this.font, text, textX, textY, 0xFF5555, true); // red
+                guiGraphics.drawString(this.font, text, textX, textY, 0xFF5555, true);
                 guiGraphics.pose().popPose();
 
-                // Re-enable blend for any subsequent overlaps
                 RenderSystem.enableBlend();
 
-            } else if (!stackInSlot.isEmpty() && currentInSlot >= totalNeeded) {
+            } else {
+                // Fully filled — green overlay + checkmark
                 guiGraphics.fill(x, y, x + 16, y + 16, 0x8000FF00);
 
-                // Draw green checkmark
                 String check = "✔";
                 guiGraphics.pose().pushPose();
                 guiGraphics.pose().translate(0, 0, 250.0f);
@@ -278,7 +301,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
                 guiGraphics.pose().popPose();
             }
 
-            RenderSystem.disableBlend(); // Final blend disable
+            RenderSystem.disableBlend();
         }
 
 // 6. Finally, render the tooltips over everything else
