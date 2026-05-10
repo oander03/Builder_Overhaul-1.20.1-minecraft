@@ -22,6 +22,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.common.capabilities.Capability;
@@ -153,6 +154,35 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         load(tag);
     }
 
+    public void dumpItemsToPlayer(ServerPlayer player) {
+        for (int i = 0; i < itemHandler.getSlots(); i++) {
+            ItemStack stack = itemHandler.getStackInSlot(i);
+            if (stack.isEmpty()) continue;
+
+            // Split into legal stack sizes and give to player
+            while (stack.getCount() > 0) {
+                int giveCount = Math.min(stack.getCount(), stack.getItem().getMaxStackSize());
+                ItemStack toGive = stack.copy();
+                toGive.setCount(giveCount);
+
+                if (!player.getInventory().add(toGive)) {
+                    // Inventory full — drop at player's feet instead
+                    player.drop(toGive, false);
+                }
+
+                stack.shrink(giveCount);
+            }
+
+            // Clear the slot in the block entity
+            itemHandler.setStackInSlot(i, ItemStack.EMPTY);
+        }
+
+        this.setChanged();
+        if (level != null) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+
 
 
     // Inside PreviewBlockEntity.java
@@ -277,6 +307,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
 
 
+
     private void saveBuildSnapshots(CompoundTag tag) {
         ListTag snapshotList = new ListTag();
         for (Map.Entry<BlockPos, PreviewManager.BuildSnapshot> entry : buildSnapshots.entrySet()) {
@@ -289,6 +320,22 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         tag.put("BuildSnapshots", snapshotList);
     }
 
+    // Add this field alongside your other fields
+    private ListTag savedPlayerInventory = null;
+
+    // Add these two methods
+    public void savePlayerInventory(ListTag inventoryTag) {
+        this.savedPlayerInventory = inventoryTag.copy();
+        this.setChanged();
+    }
+
+    public ListTag getAndClearSavedInventory() {
+        ListTag tag = this.savedPlayerInventory;
+        this.savedPlayerInventory = null;
+        this.setChanged();
+        return tag;
+    }
+
     // Full save to disk — everything
     @Override
     protected void saveAdditional(CompoundTag tag) {
@@ -297,6 +344,30 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         saveRequiredItems(tag);
         saveBuildSnapshots(tag); // expensive, but only for disk
         if (ownerUUID != null) tag.putUUID("Owner", ownerUUID);
+        // ✅ NEW: persist the player's real inventory so it survives restarts
+        if (savedPlayerInventory != null) {
+            tag.put("SavedPlayerInventory", savedPlayerInventory);
+        }
+        if (savedGameMode != null) tag.putInt("SavedGameMode", savedGameMode.getId());
+
+    }
+
+    private GameType savedGameMode = null;
+
+    public void saveGameMode(GameType gameType) {
+        this.savedGameMode = gameType;
+        setChanged();
+    }
+
+    public GameType getAndClearSavedGameMode() {
+        GameType gm = this.savedGameMode;
+        this.savedGameMode = null;
+        setChanged();
+        return gm;
+    }
+
+    public boolean hasSavedGameMode() {
+        return this.savedGameMode != null;
     }
 
     // Lightweight client sync — skip build snapshots entirely
@@ -306,7 +377,9 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         saveInventory(nbt);
         saveRequiredItems(nbt);
         if (ownerUUID != null) nbt.putUUID("Owner", ownerUUID);
-        // DO NOT include BuildSnapshots here — client doesn't need them for the HUD
+        if (savedPlayerInventory != null) {
+            nbt.put("SavedPlayerInventory", savedPlayerInventory); // ✅ add this
+        }
         return nbt;
     }
 
@@ -350,6 +423,14 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         var lookup = this.level != null ?
                 this.level.holderLookup(Registries.BLOCK) :
                 net.minecraft.core.registries.BuiltInRegistries.BLOCK.asLookup();
+
+        if (tag.contains("SavedPlayerInventory")) {
+            this.savedPlayerInventory = tag.getList("SavedPlayerInventory", 10);
+        }
+
+        if (tag.contains("SavedGameMode")) {
+            this.savedGameMode = GameType.byId(tag.getInt("SavedGameMode"));
+        }
 
         if (tag.contains("BuildSnapshots")) {
             this.buildSnapshots.clear();

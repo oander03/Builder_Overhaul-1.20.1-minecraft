@@ -12,6 +12,7 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
 import javax.annotation.Nullable;
@@ -107,17 +108,47 @@ public class PreviewManager {
     }
 
     public static void startInventoryPreview(ServerPlayer player) {
-        // 1. Save logic (your existing code)
+        UUID id = player.getUUID();
         ListTag inventoryTag = new ListTag();
         player.getInventory().save(inventoryTag);
-        savedInventories.put(player.getUUID(), inventoryTag);
+        savedInventories.put(id, inventoryTag);
 
-        // 2. Clear Main Inventory & Offhand
-        player.getInventory().items.clear(); // This is cleaner than a loop
+        BlockPos anchor = playerAnchorPos.get(id);
+        if (anchor != null && player.level().getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+            be.savePlayerInventory(inventoryTag);
+            be.saveGameMode(previousGameModes.getOrDefault(id, GameType.SURVIVAL)); // ✅ persist it
+        }
+
+        player.getInventory().items.clear();
         player.getInventory().offhand.clear();
+        player.connection.send(new ClientboundContainerSetContentPacket(
+                player.inventoryMenu.containerId,
+                player.inventoryMenu.incrementStateId(),
+                player.inventoryMenu.getItems(),
+                player.inventoryMenu.getCarried()
+        ));
+    }
 
-        // 2. Force a manual sync packet
-        // We send the 'Inventory Menu' (the player's main inventory) to the client
+    public static void restoreInventory(ServerPlayer player) {
+        UUID id = player.getUUID();
+
+        // Try in-memory first (normal exit), fall back to BE (post-restart exit)
+        ListTag inventoryTag = savedInventories.remove(id);
+
+        if (inventoryTag == null) {
+            // ✅ NEW: Grab it from the block entity instead
+            BlockPos anchor = playerAnchorPos.get(id);
+            if (anchor != null && player.level().getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+                inventoryTag = be.getAndClearSavedInventory();
+            }
+        }
+
+        if (inventoryTag == null) return; // Nothing to restore
+
+        player.getInventory().items.clear();
+        player.getInventory().offhand.clear();
+        player.getInventory().load(inventoryTag);
+
         player.connection.send(new ClientboundContainerSetContentPacket(
                 player.inventoryMenu.containerId,
                 player.inventoryMenu.incrementStateId(),
@@ -142,55 +173,132 @@ public class PreviewManager {
         UUID id = player.getUUID();
         Level level = player.level();
 
-
         BlockState state = level.getBlockState(pos);
         if (state.hasProperty(PreviewBlock.ACTIVE)) {
             level.setBlock(pos, state.setValue(PreviewBlock.ACTIVE, true), 18);
         }
 
         if (level.getBlockEntity(pos) instanceof PreviewBlockEntity be) {
+            be.dumpItemsToPlayer(player);
+        }
 
-            // 1. Get the existing snapshots from the Block Entity
+        if (level.getBlockEntity(pos) instanceof PreviewBlockEntity be) {
             Map<BlockPos, BuildSnapshot> savedBuild = be.getBuildSnapshots();
             Map<BlockPos, BuildSnapshot> validatedBuild = new HashMap<>();
 
             if (savedBuild != null) {
                 savedBuild.forEach((blockPos, snapshot) -> {
                     BlockState worldState = level.getBlockState(blockPos);
-
-                    // LOGIC: Check if this was a "Red Block" (intent to break)
-                    // If the player wanted it to be Air, but it's ALREADY Air in the world,
-                    // we skip adding it to the validatedBuild (effectively deleting it from memory).
-                    if (snapshot.buildState.isAir() && worldState.isAir()) {
-                        // Do nothing - this "red block" is already gone in survival.
-                        return;
-                    }
-
+                    if (snapshot.buildState.isAir() && worldState.isAir()) return;
                     if (!worldState.equals(snapshot.buildState) && !worldState.equals(snapshot.originalState)) {
-                        // Update the 'originalState' so rollbacks target the NEW survival block.
                         snapshot.updateOriginalState(worldState);
                     }
-
-                    // Otherwise, keep it in the session
                     validatedBuild.put(blockPos, snapshot);
                 });
             }
 
-            // 2. Put the cleaned-up map into the manager's memory
             pendingCommit.put(id, validatedBuild);
-
-            // 3. Optional: Sync the cleaned map back to the Block Entity immediately
-            // so the "Shopping List" updates even before you exit.
             be.setBuildData(validatedBuild, calculateRequiredItemsFromMap(validatedBuild), id);
         }
 
-        startInventoryPreview(player);
-        previousGameModes.put(id, player.gameMode.getGameModeForPlayer());
+        // ✅ Set anchor BEFORE startInventoryPreview so the BE lookup inside it succeeds
         playerAnchorPos.put(id, pos);
+        previousGameModes.put(id, player.gameMode.getGameModeForPlayer());
 
-        restorePendingBuild(player); // Now safe to call
+        // At the end of enterPreview, after playerAnchorPos.put(id, pos):
+        PreviewSavedData.get((net.minecraft.server.level.ServerLevel) level).saveSession(id, pos);
+
+
+        startInventoryPreview(player); // now playerAnchorPos.get(id) returns pos correctly
+
+        restorePendingBuild(player);
         player.setGameMode(GameType.CREATIVE);
         player.displayClientMessage(Component.literal("§aEntering Build Mode"), true);
+    }
+
+    public static void rehydrateSession(UUID playerId, BlockPos anchor) {
+        playerAnchorPos.put(playerId, anchor);
+        // Don't touch previousGameModes — exitPreview will default to SURVIVAL if missing
+    }
+
+    public static void flushSessionChanges(ServerPlayer player) {
+        UUID id = player.getUUID();
+        Map<BlockPos, BlockState> currentSession = sessionChanges.get(id);
+        if (currentSession == null) return;
+
+        Map<BlockPos, BuildSnapshot> complexSnapshot = pendingCommit.computeIfAbsent(id, k -> new HashMap<>());
+        Level level = player.level();
+
+        currentSession.forEach((pos, originalState) -> {
+            BlockState currentState = level.getBlockState(pos);
+            if (!complexSnapshot.containsKey(pos)) {
+                complexSnapshot.put(pos, new BuildSnapshot(originalState, currentState));
+            } else {
+                complexSnapshot.computeIfPresent(pos, (k, existing) -> new BuildSnapshot(existing.originalState, existing.buildState));
+            }
+        });
+
+        // Persist flushed data to the block entity
+        BlockPos anchor = playerAnchorPos.get(id);
+        if (anchor != null && player.level().getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+            be.setBuildData(complexSnapshot, calculateRequiredItemsFromMap(complexSnapshot), id);
+            be.setChanged();
+        }
+    }
+
+    public static void tryRehydrateOnLogin(ServerPlayer player) {
+        UUID id = player.getUUID();
+        net.minecraft.server.level.ServerLevel level =
+                (net.minecraft.server.level.ServerLevel) player.level();
+
+        BlockPos anchor = PreviewSavedData.get(level).getSession(id);
+        System.out.println("[Preview] Login rehydrate. Anchor from SavedData: " + anchor);
+
+        if (anchor != null) {
+            // Check what the BE actually has
+            if (level.getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+                System.out.println("[Preview] BE snapshot count on login: " + be.getBuildSnapshots().size());
+            } else {
+                System.out.println("[Preview] ERROR: No BE found at anchor on login");
+            }
+            rehydrateSession(id, anchor);
+        }
+    }
+
+    public static void rehydrateAndExit(ServerPlayer player) {
+        UUID id = player.getUUID();
+        BlockPos anchor = playerAnchorPos.get(id);
+        if (anchor == null) return;
+
+        Level level = player.level();
+
+        if (level.getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+            Map<BlockPos, BuildSnapshot> savedSnapshots = be.getBuildSnapshots();
+            if (savedSnapshots != null && !savedSnapshots.isEmpty()) {
+                pendingCommit.put(id, new HashMap<>(savedSnapshots));
+
+                // Calculate cost from raw snapshot data BEFORE exitPreview can wipe it.
+                // Use calculateRequiredItemsFromMap (compares buildState vs originalState)
+                // rather than calculateRequiredItems (compares world state vs originalState),
+                // because the world has already been rolled back on logout.
+                Map<Item, Integer> correctCost = calculateRequiredItemsFromMap(savedSnapshots);
+                be.setRequiredItems(correctCost, id);
+                be.setChanged();
+            }
+        }
+
+        exitPreview(player);
+
+        // exitPreview clears pendingCommit entries but keeps the BE's requiredItems intact.
+        // Re-push the cost one more time after exit so it survives the setBuildData call
+        // inside exitPreview (which recalculates from an already-rolled-back world = empty).
+        if (level.getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+            if (be.getRequiredItems().isEmpty() && !be.getBuildSnapshots().isEmpty()) {
+                Map<Item, Integer> correctCost = calculateRequiredItemsFromMap(be.getBuildSnapshots());
+                be.setRequiredItems(correctCost, id);
+            }
+            be.updateBlock();
+        }
     }
 
     private static void restorePendingBuild(ServerPlayer player) {
@@ -219,7 +327,8 @@ public class PreviewManager {
     private static final Map<UUID, Long> lastSyncTime = new HashMap<>();
     private static final long SYNC_INTERVAL_MS = 150;
 
-    public static void recordAndSync(ServerPlayer player, BlockPos placedPos, BlockState stateBefore) {
+    public static void recordAndSync(ServerPlayer player, BlockPos placedPos,
+                                     BlockState stateBefore, @Nullable BlockPos pendingAir) {
         UUID id = player.getUUID();
         BlockPos anchor = playerAnchorPos.get(id);
         if (anchor == null) return;
@@ -233,45 +342,21 @@ public class PreviewManager {
             Map<BlockPos, BuildSnapshot> complexSnapshot = pendingCommit.computeIfAbsent(id, k -> new HashMap<>());
 
             changes.forEach((pos, original) -> {
-                BlockState current = player.level().getBlockState(pos);
+                // ← KEY FIX: treat pendingAir pos as AIR, not whatever's still in the world
+                BlockState current = pos.equals(pendingAir)
+                        ? Blocks.AIR.defaultBlockState()
+                        : player.level().getBlockState(pos);
                 complexSnapshot.put(pos, new BuildSnapshot(original, current));
             });
 
-            Map<Item, Integer> liveCost = calculateRequiredItems(player, null);
+            Map<Item, Integer> liveCost = calculateRequiredItems(player, pendingAir);
             be.setRequiredItems(liveCost, id);
 
-            // ✅ Throttled sync — updates client dynamically but not on every single block spam
             long now = System.currentTimeMillis();
             if (now - lastSyncTime.getOrDefault(id, 0L) >= SYNC_INTERVAL_MS) {
                 lastSyncTime.put(id, now);
                 be.updateBlock();
             }
-        }
-    }
-
-    public static void restoreInventory(ServerPlayer player) {
-        UUID id = player.getUUID();
-
-        if (savedInventories.containsKey(id)) {
-            // 1. Clear the "Creative" items they currently have in their hands/bag
-            player.getInventory().items.clear();
-            player.getInventory().offhand.clear();
-
-            // 2. Load the old items back from the saved ListTag
-            // This restores armor, off-hand, and main items automatically
-            player.getInventory().load(savedInventories.get(id));
-
-            // 3. Force a manual sync packet to the client
-            // This is the "Magic Bullet" that makes items reappear instantly
-            player.connection.send(new ClientboundContainerSetContentPacket(
-                    player.inventoryMenu.containerId,
-                    player.inventoryMenu.incrementStateId(),
-                    player.inventoryMenu.getItems(),
-                    player.inventoryMenu.getCarried()
-            ));
-
-            // 4. Cleanup the map so we don't leak memory
-            savedInventories.remove(id);
         }
     }
 
@@ -338,7 +423,12 @@ public class PreviewManager {
         // 4. RESTORE PLAYER
         player.removeAllEffects();
         restoreInventory(player);
-        player.setGameMode(previousGameModes.getOrDefault(id, GameType.SURVIVAL));
+        GameType previousMode = previousGameModes.getOrDefault(id, null);
+        if (previousMode == null && anchor != null
+                && level.getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+            previousMode = be.getAndClearSavedGameMode();
+        }
+        player.setGameMode(previousMode != null ? previousMode : GameType.SURVIVAL);
 
 // Inside exitPreview
         if (anchor != null) {
@@ -348,6 +438,8 @@ public class PreviewManager {
         }
 
         // 5. CLEANUP
+        // At the end of exitPreview cleanup section:
+        PreviewSavedData.get((net.minecraft.server.level.ServerLevel) level).removeSession(id);
         sessionChanges.remove(id);
         playerAnchorPos.remove(id);
         previousGameModes.remove(id);
@@ -372,6 +464,15 @@ public class PreviewManager {
         // Snow layer melting
         if (placed.is(Blocks.SNOW) && current.is(Blocks.AIR)) return true;
         return false;
+    }
+
+    public static void cleanupSessionOnly(UUID id) {
+        sessionChanges.remove(id);
+        previousGameModes.remove(id);
+        lastSyncTime.remove(id);
+        savedInventories.remove(id);
+        playerAnchorPos.remove(id);
+        // Intentionally keep: pendingCommit (shopping list), SavedData (anchor lookup)
     }
 
     public static boolean isInPreview(UUID id) {

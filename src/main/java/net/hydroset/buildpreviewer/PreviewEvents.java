@@ -271,51 +271,72 @@ public class PreviewEvents {
 
     @SubscribeEvent
     public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player) {
-            if (PreviewManager.isInPreview(player.getUUID())) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (!PreviewManager.isInPreview(player.getUUID())) return;
 
-                // Get the anchor before we clear the manager data
-                BlockPos anchor = PreviewManager.getAnchorPos(player.getUUID());
-                Level level = player.level();
+        UUID id = player.getUUID();
+        BlockPos anchor = PreviewManager.getAnchorPos(id);
+        Level level = player.level();
 
-                // 1. Force the texture and particles OFF immediately
-                if (anchor != null) {
-                    BlockState state = level.getBlockState(anchor);
-                    // Ensure we are actually looking at our PreviewBlock
-                    if (state.hasProperty(net.hydroset.buildpreviewer.block.PreviewBlock.ACTIVE)) {
-                        level.setBlock(anchor, state.setValue(net.hydroset.buildpreviewer.block.PreviewBlock.ACTIVE, false), 3);
-                    }
+        // 1. Flush session changes
+        PreviewManager.flushSessionChanges(player);
+
+        // 2. Save to BE
+        Map<BlockPos, PreviewManager.BuildSnapshot> snapshots = PreviewManager.pendingCommit.get(id);
+
+        System.out.println("[Preview] Logging out. Snapshot count: " + (snapshots != null ? snapshots.size() : 0));
+
+        if (anchor != null && level.getBlockEntity(anchor) instanceof PreviewBlockEntity be) {
+            if (snapshots != null) {
+                be.setBuildData(snapshots, PreviewManager.calculateRequiredItemsFromMap(snapshots), id);
+            }
+            be.setChanged();
+            System.out.println("[Preview] BE saved. Snapshot count in BE: " + be.getBuildSnapshots().size());
+        } else {
+            System.out.println("[Preview] ERROR: Could not find BE at anchor " + anchor);
+        }
+
+        // 3. Roll back world
+        if (snapshots != null) {
+            snapshots.forEach((pos, snapshot) -> {
+                if (level.hasChunkAt(pos)) {
+                    level.setBlock(pos, snapshot.originalState, 2 | 16 | 128);
                 }
-                // Force exit logic
-                PreviewManager.exitPreview(player);
+            });
+        }
 
-                if (anchor != null) {
-                    player.teleportTo(anchor.getX() + 0.5, anchor.getY() + 1.0, anchor.getZ() + 0.5);
-                }
+        // 4. Turn off ACTIVE
+        if (anchor != null) {
+            BlockState anchorState = level.getBlockState(anchor);
+            if (anchorState.hasProperty(net.hydroset.buildpreviewer.block.PreviewBlock.ACTIVE)) {
+                level.setBlock(anchor, anchorState.setValue(net.hydroset.buildpreviewer.block.PreviewBlock.ACTIVE, false), 3);
             }
         }
+
+        PreviewManager.cleanupSessionOnly(id);
     }
+
+
 
     @SubscribeEvent
     public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player) {
-            // 1. Get the world's default game mode (Creative, Survival, etc.)
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+
+        PreviewManager.tryRehydrateOnLogin(player);
+
+        if (PreviewManager.isInPreview(player.getUUID())) {
+            Objects.requireNonNull(player.getServer()).tell(new net.minecraft.server.TickTask(
+                    player.getServer().getTickCount() + 2, () -> {
+                PreviewManager.rehydrateAndExit(player);  // ← changed from exitPreview
+                player.sendSystemMessage(Component.literal(
+                        "§eYour preview session was automatically ended because you logged out."));
+            }
+            ));
+        } else {
             GameType defaultMode = player.getServer().getDefaultGameType();
-
-            BlockPos anchor = PreviewManager.getAnchorPos(player.getUUID());
-            Level level = player.level();
-
-            // 2. If the world itself is a Creative world, we don't need to force anything.
             if (defaultMode == GameType.CREATIVE) return;
-
-            // 3. If they are in Creative but the world is Survival, check if they are in a preview.
-            if (player.gameMode.getGameModeForPlayer() == GameType.CREATIVE && !PreviewManager.isInPreview(player.getUUID())) {
-
-                // 4. Final Safety: Check if the player is an Admin/OP (Permission Level 2+).
-                // If they are an OP, assume they are in Creative intentionally and leave them alone.
+            if (player.gameMode.getGameModeForPlayer() == GameType.CREATIVE) {
                 if (player.hasPermissions(2)) return;
-
-                // Only if they are a normal player in a Survival world who isn't in a preview session
                 player.setGameMode(GameType.SURVIVAL);
             }
         }
@@ -351,22 +372,23 @@ public class PreviewEvents {
         if (!(event.getEntity() instanceof Player player)) return;
         UUID uuid = player.getUUID();
 
-        // In onBlockPlace, non-preview branch:
         if (!PreviewManager.isInPreview(uuid)) {
-            if (isRealPlayer(player)) { // ✅
-                PreviewManager.recordChange(uuid, event.getPos(), event.getPlacedBlock());
+            if (isRealPlayer(player)) {
+                // stateBefore = AIR (or whatever was there), not the placed block
+                BlockState stateBefore = pendingPlacementState.remove(uuid);
+                PreviewManager.recordChange(uuid, event.getPos(),
+                        stateBefore != null ? stateBefore : Blocks.AIR.defaultBlockState());
             }
             return;
         }
 
         if (player instanceof ServerPlayer serverPlayer) {
-            // ✅ Retrieve the pre-placement state we stashed in onBeforePlace
             BlockState stateBefore = pendingPlacementState.remove(uuid);
             if (stateBefore == null) {
-                // Fallback — shouldn't happen but just in case
                 stateBefore = Blocks.AIR.defaultBlockState();
             }
-            PreviewManager.recordAndSync(serverPlayer, event.getPos(), stateBefore);
+            // null pendingAir = this is a place, not a break, no override needed
+            PreviewManager.recordAndSync(serverPlayer, event.getPos(), stateBefore, null);
         }
     }
 
@@ -412,9 +434,7 @@ public class PreviewEvents {
 
     @SubscribeEvent
     public static void onServerStopping(net.minecraftforge.event.server.ServerStoppingEvent event) {
-        // Wipe everything to prevent "Ghost Worlds"
         PreviewManager.pendingCommit.clear();
-        // Clear other static maps here if needed
     }
 
     @SubscribeEvent
@@ -530,6 +550,11 @@ public class PreviewEvents {
             if (isBlockBusy) {
                 event.setCanceled(true);
                 event.getPlayer().displayClientMessage(Component.literal("§cThis block is currently locked in a Preview!"), true);
+            }
+
+// Change it to:
+            if (player instanceof ServerPlayer serverPlayer) {
+                PreviewManager.recordAndSync(serverPlayer, event.getPos(), event.getState(), event.getPos());
             }
         }
     }
