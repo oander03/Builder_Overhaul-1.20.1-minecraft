@@ -70,7 +70,7 @@ public class PreviewMenu extends AbstractContainerMenu {
                 for (int j = 0; j < 9; j++) {
                     final int slotIndex = j + i * 9;
                     int x = 8 + j * 18;
-                    int y = 18 + i * 18;
+                    int y = 41 + i * 18;
 
                     // Use ScrollableSlot instead of SlotItemHandler
                     this.addSlot(new ScrollableSlot(handler, slotIndex, x, y) {
@@ -192,14 +192,14 @@ public class PreviewMenu extends AbstractContainerMenu {
     private void addPlayerInventory(Inventory playerInventory) {
         for (int i = 0; i < 3; ++i) {
             for (int l = 0; l < 9; ++l) {
-                this.addSlot(new Slot(playerInventory, l + i * 9 + 9, 8 + l * 18, 84 + i * 18));
+                this.addSlot(new Slot(playerInventory, l + i * 9 + 9, 8 + l * 18, 107 + i * 18));
             }
         }
     }
 
     private void addPlayerHotbar(Inventory playerInventory) {
         for (int i = 0; i < 9; ++i) {
-            this.addSlot(new Slot(playerInventory, i, 8 + i * 18, 142));
+            this.addSlot(new Slot(playerInventory, i, 8 + i * 18, 165));
         }
     }
 

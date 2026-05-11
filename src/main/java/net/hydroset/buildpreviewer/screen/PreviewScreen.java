@@ -70,6 +70,8 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
     public PreviewScreen(PreviewMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
+        this.imageWidth  = 183;
+        this.imageHeight = 224;
     }
 
     private static final ResourceLocation TEXTURE =
@@ -77,6 +79,11 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
     private static final ResourceLocation TEXTURE_SCROLL =
             new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/preview_block_gui_scroll.png");
+
+
+    /** The visible texture width (your PNG). imageWidth is wider to allow scrollbar overflow. */
+    private static final int TEXTURE_RENDER_WIDTH = 183;
+
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
@@ -91,8 +98,8 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        int x = (width - imageWidth) / 2;
-        int y = (height - imageHeight) / 2;
+        int x = this.leftPos;
+        int y = this.topPos;
 
         // Check if mouse is within the scroll bar column
         if (mouseX >= x + 174 && mouseX <= x + 174 + 12) {
@@ -113,7 +120,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
         if (this.isScrolling) {
-            int y = (height - imageHeight) / 2 + 18;
+            int y = this.topPos + 18;
             int totalItems = menu.getBlockEntity().getRequiredItems().size();
             int totalRows = (int) Math.ceil(totalItems / 9.0);
             int maxScroll = Math.max(0, totalRows - 3);
@@ -137,8 +144,8 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         RenderSystem.setShader(GameRenderer::getPositionTexShader);
         RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
 
-        int x = (width - imageWidth) / 2;
-        int y = (height - imageHeight) / 2;
+        int x = this.leftPos;
+        int y = this.topPos;
 
         // After:
         int totalItems = menu.getBlockEntity().getRequiredItems().size();
@@ -146,8 +153,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         boolean needsScroll = totalRows > 3;
 
         ResourceLocation activeTex = needsScroll ? TEXTURE_SCROLL : TEXTURE;
-        guiGraphics.blit(activeTex, x, y, 0, 0, imageWidth, imageHeight);
-
+        guiGraphics.blit(activeTex, x, y, 0, 0, TEXTURE_RENDER_WIDTH, imageHeight);
         int maxScroll = needsScroll ? totalRows - 3 : 0;
 
         int scrollBarX = x + 174;
@@ -187,8 +193,11 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
     @Override
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-        // Note: Inside renderLabels, (0,0) is already this.leftPos, this.topPos
-        super.renderLabels(guiGraphics, mouseX, mouseY);
+// "REQUIRED ITEMS" label — adjust these two numbers
+        guiGraphics.drawString(this.font, this.title, 8, 29, 0x404040, false);
+
+        // "Inventory" label — adjust these two numbers
+        guiGraphics.drawString(this.font, this.playerInventoryTitle, 8, 96, 0x404040, false);
     }
 
     // Animated fill progress per slot (smoothly lerps toward real value)
@@ -564,13 +573,13 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             slotBubbles.add(new ArrayList<>());
         }
 
-        int finalizeWidth = 70;
+        int finalizeWidth = 62;
         int toggleWidth = 94;
         int spacing = 4;
 
         int totalWidth = finalizeWidth + toggleWidth + spacing;
-        int startX = this.leftPos + (this.imageWidth / 2) - (totalWidth / 2);
-        int buttonY = this.topPos - 25;
+        int startX = this.leftPos + (this.imageWidth / 2) - (totalWidth / 2) -3;
+        int buttonY = this.topPos + this.imageHeight - 30;
 
 // 1. Finalize Button
         this.finalizeButton = Button.builder(Component.literal("♦ Finalize"), (button) -> {
