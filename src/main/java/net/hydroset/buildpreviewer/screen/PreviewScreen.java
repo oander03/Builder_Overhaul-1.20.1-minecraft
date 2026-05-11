@@ -46,17 +46,18 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         }
     }
 
-    // Bubble particle system
     private static class Bubble {
         float x, y;
-        float speed;
+        float baseSpeed; // base speed, multiplied dynamically
+        float speed;     // can remove this field or keep as alias — replace usage below
         float alpha;
-        int size; // 1 or 2px
+        int size;
 
-        Bubble(float x, float y, float speed, float alpha, int size) {
+        Bubble(float x, float y, float baseSpeed, float alpha, int size) {
             this.x = x;
             this.y = y;
-            this.speed = speed;
+            this.baseSpeed = baseSpeed;
+            this.speed = baseSpeed; // kept for compatibility but we'll use baseSpeed
             this.alpha = alpha;
             this.size = size;
         }
@@ -174,6 +175,13 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     }
 
     private final long startNanos = System.nanoTime();
+    private final float[] wave2Amplitude = new float[27];  // current disturbance amplitude per slot
+    private int[] lastItemCount = new int[27];
+    // initialized to -1 so first placement always triggers the spike
+    { java.util.Arrays.fill(lastItemCount, -1); }
+
+    private final float[] bubbleSpeedMult = new float[27];
+
 
 
 
@@ -319,24 +327,45 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 // First pass: fill entire slot dark, then paint the wave over it
                 guiGraphics.fill(x, y, x + 16, slotBottom, 0x99000000);
 
+                // --- ITEM COUNT SPIKE DETECTION (must be outside fillHeight check!) ---
+                int currentCount = stackInSlot.is(reqItem) ? stackInSlot.getCount() : 0;
+                if (currentCount > lastItemCount[i]) {
+                    wave2Amplitude[i] = 5.5f;
+                    bubbleSpeedMult[i] = 4.0f;
+                }
+                lastItemCount[i] = currentCount;
+
+                wave2Amplitude[i] *= 0.96f;
+                if (wave2Amplitude[i] < 0.01f) wave2Amplitude[i] = 0f;
+
+                bubbleSpeedMult[i] *= 0.96f;
+                if (bubbleSpeedMult[i] < 0.01f) bubbleSpeedMult[i] = 0f;
+
                 if (fillHeight > 0) {
                     double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
-                    double time = elapsedSeconds * 2.2; // wave speed in seconds
-                    double shimmerTime = elapsedSeconds * 5.0; // shimmer speed in seconds
+
+                    double wave1Time = elapsedSeconds * 1.8;
+                    double wave1Amp  = 0.6;
+
+                    double wave2Time = elapsedSeconds * 9.0;  // fast frequency
+                    float w2amp = wave2Amplitude[i];
+
+                    double shimmerTime = elapsedSeconds * 5.0;
                     float shimmerAlpha = (float)(0.4 + 0.35 * Math.sin(shimmerTime));
                     int shimmerA = (int)(shimmerAlpha * 255) << 24;
                     int shimmerColor = shimmerA | 0x00FFFFFF;
 
                     for (int col = 0; col < 16; col++) {
-                        // Two sine waves offset from each other for a more natural look
-                        double wave = Math.sin(time + col * 0.37);
-                        int waveOffset = (int)Math.round(wave);
+                        // Wave 1: subtle constant ripple
+                        double w1 = Math.sin(wave1Time*1.3 + col * 0.37) * wave1Amp*1.3;
+                        // Wave 2: fast decaying disturbance ripple
+                        double w2 = Math.sin(wave2Time*2.8 + col * 0.20) * w2amp*0.8;
 
-                        // Base fill top (flat), then offset by wave
+                        int waveOffset = (int) Math.round(w1 + w2);
+
                         int baseFillTop = slotBottom - fillHeight;
-                        int colFillTop = Math.max(y, Math.min(slotBottom - 1, baseFillTop + waveOffset));
+                        int colFillTop  = Math.max(y, Math.min(slotBottom - 1, baseFillTop + waveOffset));
 
-                        // Colored fill for this column from wave top to slot bottom
                         int overlayColorCol;
                         if (fillProgress <= 0f) {
                             overlayColorCol = 0x99000000;
@@ -350,11 +379,8 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
                         guiGraphics.fill(x + col, colFillTop, x + col + 1, slotBottom, overlayColorCol);
 
-
                         if (fillProgress < 1.0f) {
-                            // Top shimmer pixel at the wave crest for this column
                             guiGraphics.fill(x + col, colFillTop, x + col + 1, colFillTop + 1, shimmerColor);
-                            // Fainter second pixel below
                             if (colFillTop + 1 < slotBottom) {
                                 guiGraphics.fill(x + col, colFillTop + 1, x + col + 1, colFillTop + 2, shimmerColor & 0x88FFFFFF);
                             }
@@ -396,7 +422,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 // Spawn new bubbles — works whether filling or fully green
             boolean shouldSpawn = fillProgress > 0.05f; // only if there's something to bubble in
             if (shouldSpawn && now - lastBubbleTime > 120) { // spawn rate: every 120ms across all active slots
-                if (bubbles.size() < 5 && Math.random() < 0.02) { // max 6 bubbles per slot
+                if (bubbles.size() < 6 && Math.random() < 0.1) { // max 6 bubbles per slot
                     // Cube the random value to strongly bias toward the outer edges
                     double edgeBias = Math.pow(Math.random(), 2);
                     float bx;
@@ -432,9 +458,11 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             guiGraphics.pose().translate(0, 0, 50.0f);
             RenderSystem.enableBlend();
 
+            final float slotBubbleMult = 1.0f + bubbleSpeedMult[i] * 2.0f;
+
             bubbles.removeIf(b -> {
                 // Move bubble up
-                b.y -= b.speed;
+                b.y -= b.baseSpeed * slotBubbleMult;
 
                 // Remove if it has risen above the waterline
                 if (b.y < ceilingY) return true;
@@ -518,6 +546,8 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
         renderTooltip(guiGraphics, mouseX, mouseY);
     }
+
+
 
     private Button toggleButton;
     private Button finalizeButton;
