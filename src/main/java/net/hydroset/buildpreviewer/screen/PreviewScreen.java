@@ -193,11 +193,28 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
     @Override
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-// "REQUIRED ITEMS" label — adjust these two numbers
-        guiGraphics.drawString(this.font, this.title, 8, 29, 0x404040, false);
 
+// Manual shadow (drawn 1px right and 1px down in dark color first)
+        guiGraphics.drawString(this.font, "Blueprint Builder", 24, 11, 0x111111, false);
+// Then the real text on top
+        guiGraphics.drawString(this.font, "Blueprint Builder", 23, 10, 0xa77d7d, false);
+
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().scale(0.8f, 0.8f, 1.0f);
+        guiGraphics.drawString(this.font, "Committing", (int)(125/0.8), (int)(11/0.8), 0x63333c, false);
+        guiGraphics.pose().popPose();
+
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().scale(0.9f, 0.9f, 1.0f);
+        guiGraphics.drawString(this.font, this.title, (int)(8/0.9), (int)(30/0.9), 0x404040, false);
+        guiGraphics.pose().popPose();
+// "REQUIRED ITEMS" label — adjust these two numbers
+
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().scale(0.9f, 0.9f, 1.0f);
+        guiGraphics.drawString(this.font, this.playerInventoryTitle, (int)(8/0.9), (int)(97/0.9), 0x404040, false);
+        guiGraphics.pose().popPose();
         // "Inventory" label — adjust these two numbers
-        guiGraphics.drawString(this.font, this.playerInventoryTitle, 8, 96, 0x404040, false);
     }
 
     // Animated fill progress per slot (smoothly lerps toward real value)
