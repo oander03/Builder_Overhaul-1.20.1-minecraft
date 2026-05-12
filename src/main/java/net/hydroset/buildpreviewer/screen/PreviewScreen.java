@@ -70,7 +70,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
     public PreviewScreen(PreviewMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
-        this.imageWidth  = 183;
+        this.imageWidth  = 184;
         this.imageHeight = 224;
     }
 
@@ -80,9 +80,11 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     private static final ResourceLocation TEXTURE_SCROLL =
             new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/preview_block_gui_scroll.png");
 
+    private static final ResourceLocation SLOT_TEXTURE =
+            new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/single_slot_gui.png");
 
     /** The visible texture width (your PNG). imageWidth is wider to allow scrollbar overflow. */
-    private static final int TEXTURE_RENDER_WIDTH = 183;
+    private static final int TEXTURE_RENDER_WIDTH = 184;
 
 
     @Override
@@ -156,8 +158,8 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         guiGraphics.blit(activeTex, x, y, 0, 0, TEXTURE_RENDER_WIDTH, imageHeight);
         int maxScroll = needsScroll ? totalRows - 3 : 0;
 
-        int scrollBarX = x + 174;
-        int scrollBarYTop = y + 18;
+        int scrollBarX = x + 172;
+        int scrollBarYTop = y + 40;
         int scrollBarHeight = 54;
 
         // --- DEBUG: If you see a weird pink/black box, the path is wrong.
@@ -197,7 +199,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 // Manual shadow (drawn 1px right and 1px down in dark color first)
         guiGraphics.drawString(this.font, "Blueprint Builder", 24, 11, 0x111111, false);
 // Then the real text on top
-        guiGraphics.drawString(this.font, "Blueprint Builder", 23, 10, 0xa77d7d, false);
+        guiGraphics.drawString(this.font, "Blueprint Builder", 23, 10, 0xccb1bd, false);
 
         guiGraphics.pose().pushPose();
         guiGraphics.pose().scale(0.8f, 0.8f, 1.0f);
@@ -328,6 +330,11 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             if (completionFlash[i] > 0f) {
                 completionFlash[i] = Math.max(0f, completionFlash[i] - 0.04f);
             }
+
+            // --- SLOT BACKGROUND IMAGE ---
+            RenderSystem.setShader(GameRenderer::getPositionTexShader);
+            RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+            guiGraphics.blit(SLOT_TEXTURE, x - 1, y - 1, 0, 0, 19, 19, 19, 19);
 
 // --- DRAW OVERLAYS ---
             RenderSystem.enableBlend();
@@ -596,7 +603,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
         int totalWidth = finalizeWidth + toggleWidth + spacing;
         int startX = this.leftPos + (this.imageWidth / 2) - (totalWidth / 2) -3;
-        int buttonY = this.topPos + this.imageHeight - 30;
+        int buttonY = this.topPos + this.imageHeight - 28;
 
 // 1. Finalize Button
         this.finalizeButton = Button.builder(Component.literal("♦ Finalize"), (button) -> {
