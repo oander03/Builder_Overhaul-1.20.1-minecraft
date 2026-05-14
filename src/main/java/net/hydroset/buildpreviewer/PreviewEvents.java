@@ -398,11 +398,13 @@ public class PreviewEvents {
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onBeforePlace(PlayerInteractEvent.RightClickBlock event) {
         UUID uuid = event.getEntity().getUUID();
+        // ✅ Capture state for ALL players, not just preview players
+        BlockPos targetPos = event.getPos().relative(event.getFace());
+        BlockState currentState = event.getLevel().getBlockState(targetPos);
+        pendingPlacementState.put(uuid, currentState);
+
         if (PreviewManager.isInPreview(uuid)) {
-            BlockPos targetPos = event.getPos().relative(event.getFace());
-            BlockState currentState = event.getLevel().getBlockState(targetPos);
             PreviewManager.recordChange(uuid, targetPos, currentState);
-            pendingPlacementState.put(uuid, currentState); // ✅ stash it for onBlockPlace
         }
     }
 
@@ -478,13 +480,15 @@ public class PreviewEvents {
         // Grass spreading, leaf decay etc. have a "fake" player — check it's a real ServerPlayer
         // In onBlockBreak, non-preview branch:
         if (!PreviewManager.isInPreview(player.getUUID())) {
-            if (isRealPlayer(player)) { // ✅
-                PreviewManager.recordChange(player.getUUID(), event.getPos(), Blocks.AIR.defaultBlockState());
+            if (isRealPlayer(player)) {
+                // ✅ Pass the actual state being broken, not hardcoded AIR.
+                // AIR is wrong here — this fires for block *replacement* too (e.g. placing
+                // a log where a log already is), and we need the real pre-break state
+                // so recordChange can correctly update originalState.
+                PreviewManager.recordChange(player.getUUID(), event.getPos(), event.getState());
             }
-            return;
         }
-
-        if (PreviewManager.isInPreview(player.getUUID())) {
+        else {
 
             PreviewManager.recordChange(player.getUUID(), event.getPos(), event.getState());
 

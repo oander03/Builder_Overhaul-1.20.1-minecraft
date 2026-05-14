@@ -61,20 +61,20 @@ public class PreviewManager {
             }
         } else {
             pendingCommit.forEach((uuid, map) -> {
-                // ✅ Only update snapshots for ACTIVE preview sessions
-                if (!isInPreview(uuid)) return;
-
                 if (!map.containsKey(pos)) return;
 
                 BuildSnapshot snapshot = map.get(pos);
 
-                // ✅ If the world change matches what preview placed, this is a natural
-                // side-effect of preview building (grass->dirt, etc). Ignore it.
-                if (currentStateAtPos.equals(snapshot.buildState)) return;
+                // Only guard against "same as build" if this session is LIVE —
+                // meaning the preview block is physically in the world right now.
+                // For inactive sessions the world is already rolled back, so
+                // matching buildState is pure coincidence, not a side-effect.
+                if (isInPreview(uuid)) {
+                    if (currentStateAtPos.equals(snapshot.buildState)) return;
+                    if (currentStateAtPos.equals(snapshot.originalState)) return;
+                }
 
-                // ✅ If the world change matches originalState, nothing really changed. Ignore.
-                if (currentStateAtPos.equals(snapshot.originalState)) return;
-
+                // Always update for inactive sessions regardless of what the block is
                 if (currentStateAtPos.isAir() && snapshot.buildState.isAir()) {
                     map.remove(pos);
                 } else {
