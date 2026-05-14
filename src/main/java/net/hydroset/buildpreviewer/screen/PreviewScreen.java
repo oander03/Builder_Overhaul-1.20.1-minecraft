@@ -29,6 +29,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     // To track if the requirements actually changed
     private int lastKnownMapHash = 0;
 
+
     private void updateRequirementCache() {
         Map<Item, Integer> requirements = this.menu.getBlockEntity().getRequiredItems();
 
@@ -113,6 +114,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         return super.mouseClicked(mouseX, mouseY, button);
     }
 
+
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
         this.isScrolling = false;
@@ -191,8 +193,6 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     private final float[] bubbleSpeedMult = new float[27];
 
 
-
-
     @Override
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
 
@@ -233,12 +233,29 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         ItemStack[] tempStacks = new ItemStack[27];
         for (int i = 0; i < 27; i++) {
             Slot slot = this.menu.slots.get(i);
-            tempStacks[i] = slot.getItem().copy(); // Store a copy of the real item
-            slot.set(ItemStack.EMPTY);             // Make the slot look empty to the super method
+            tempStacks[i] = slot.getItem().copy();
+            slot.set(ItemStack.EMPTY);
         }
 
-        // 2. Call super to render the GUI frame, the Player Inventory, and Tooltips
         super.render(guiGraphics, mouseX, mouseY, delta);
+
+
+
+// --- COVER VANILLA HIGHLIGHT ON EMPTY REQUIREMENT SLOTS ---
+        for (int i = 0; i < 27; i++) {
+            Slot slot = this.menu.slots.get(i);
+            int slotX = this.leftPos + slot.x;
+            int slotY = this.topPos + slot.y;
+            if (mouseX >= slotX - 1 && mouseX < slotX + 17 && mouseY >= slotY - 1 && mouseY < slotY + 17) {
+                if (tempStacks[i].isEmpty()) {
+                    RenderSystem.setShader(GameRenderer::getPositionTexShader);
+                    RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+                    guiGraphics.blit(SLOT_TEXTURE, slotX, slotY, 1, 1, 16, 16, 19, 19);
+                }
+            }
+        }
+
+
 
         // 3. IMMEDIATELY restore the items so we can use them for our custom logic
         for (int i = 0; i < 27; i++) {
@@ -263,6 +280,8 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         if (Math.abs(menu.smoothScrollOffset - menu.targetScrollOffset) < 0.005f) {
             menu.smoothScrollOffset = menu.targetScrollOffset;
         }
+
+
 
         // Inside PreviewScreen.java render loop
         for (int i = 0; i < 27; i++) {
@@ -493,28 +512,38 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
             final float slotBubbleMult = 1.0f + bubbleSpeedMult[i] * 2.0f;
 
+            // Update and cull
             bubbles.removeIf(b -> {
-                // Move bubble up
                 b.y -= b.baseSpeed * slotBubbleMult;
+                return b.y < ceilingY;
+            });
 
-                // Remove if it has risen above the waterline
-                if (b.y < ceilingY) return true;
-
-                // Fade out as it approaches the surface
+            // Draw survivors
+            for (Bubble b : bubbles) {
                 float distToSurface = b.y - ceilingY;
                 float fadeAlpha = Math.min(1.0f, distToSurface / 4.0f);
                 int a = (int)(b.alpha * fadeAlpha * 255);
-                if (a <= 0) return true;
-
+                if (a <= 0) continue;
                 int color = (a << 24) | 0x00FFFFFF;
-                int bxi = (int) b.x;
-                int byi = (int) b.y;
-                guiGraphics.fill(bxi, byi, bxi + b.size, byi + b.size, color);
-                return false;
-            });
+                guiGraphics.fill((int) b.x, (int) b.y, (int) b.x + b.size, (int) b.y + b.size, color);
+            }
+
+
 
             RenderSystem.disableBlend();
             guiGraphics.pose().popPose();
+
+            // --- HOVER HIGHLIGHT ---
+            if (mouseX >= x - 1 && mouseX < x + 17 && mouseY >= y - 1 && mouseY < y + 17) {
+                if (!stackInSlot.isEmpty() || remaining > 0) {
+                    guiGraphics.pose().pushPose();
+                    guiGraphics.pose().translate(0, 0, 300.0f);
+                    RenderSystem.enableBlend();
+                    guiGraphics.fill(x, y, x + 16, y + 16, 0x55FFFFFF);
+                    RenderSystem.disableBlend();
+                    guiGraphics.pose().popPose();
+                }
+            }
 
         }
 
