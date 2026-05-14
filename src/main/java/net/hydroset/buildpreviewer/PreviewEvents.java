@@ -497,10 +497,6 @@ public class PreviewEvents {
         // In onBlockBreak, non-preview branch:
         if (!PreviewManager.isInPreview(player.getUUID())) {
             if (isRealPlayer(player)) {
-                // ✅ Pass the actual state being broken, not hardcoded AIR.
-                // AIR is wrong here — this fires for block *replacement* too (e.g. placing
-                // a log where a log already is), and we need the real pre-break state
-                // so recordChange can correctly update originalState.
                 PreviewManager.recordChange(player.getUUID(), event.getPos(), event.getState());
             }
         }
@@ -571,6 +567,9 @@ public class PreviewEvents {
                 event.getPlayer().displayClientMessage(Component.literal("§cThis block is currently locked in a Preview!"), true);
                 return;
             }
+
+            PreviewManager.recordChange(player.getUUID(), event.getPos(), event.getState());
+
 
 // Change it to:
             if (player instanceof ServerPlayer serverPlayer) {
