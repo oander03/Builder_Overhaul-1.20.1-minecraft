@@ -202,48 +202,53 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
             return;
         }
 
-        // 1. Prepare to track what we actually build
         Map<BlockPos, PreviewManager.BuildSnapshot> blocksToPlace = new HashMap<>();
         Map<BlockPos, PreviewManager.BuildSnapshot> remainingSnapshots = new HashMap<>(this.buildSnapshots);
 
-        // 2. Iterate through snapshots and check if we have the items for each
         for (Map.Entry<BlockPos, PreviewManager.BuildSnapshot> entry : this.buildSnapshots.entrySet()) {
             BlockPos pos = entry.getKey();
             PreviewManager.BuildSnapshot snapshot = entry.getValue();
             BlockState plannedState = snapshot.buildState;
 
-            // If it's a "break" (Air), it's free!
+            // Free removals
             if (plannedState.isAir()) {
                 blocksToPlace.put(pos, snapshot);
                 remainingSnapshots.remove(pos);
                 continue;
             }
 
-            // Check if we have the block in our itemHandler
+            // Skip secondary halves — they ride along for free with their primary
+            if (PreviewManager.isSecondaryHalf(plannedState)) continue;
+
+            // Try to consume one item for the primary half
             Item itemNeeded = plannedState.getBlock().asItem();
-            if (itemNeeded != Items.AIR) {
-                if (hasAndConsumeSingleItem(itemNeeded)) {
-                    blocksToPlace.put(pos, snapshot);
-                    remainingSnapshots.remove(pos);
+            if (itemNeeded != Items.AIR && hasAndConsumeSingleItem(itemNeeded)) {
+                blocksToPlace.put(pos, snapshot);
+                remainingSnapshots.remove(pos);
+
+                // Find and add the secondary half automatically (no item cost)
+                for (BlockPos neighbor : new BlockPos[]{
+                        pos.north(), pos.south(), pos.east(), pos.west(), pos.above(), pos.below()}) {
+                    PreviewManager.BuildSnapshot neighborSnapshot = this.buildSnapshots.get(neighbor);
+                    if (neighborSnapshot != null
+                            && PreviewManager.isSecondaryHalf(neighborSnapshot.buildState)
+                            && neighborSnapshot.buildState.getBlock() == plannedState.getBlock()) {
+                        blocksToPlace.put(neighbor, neighborSnapshot);
+                        remainingSnapshots.remove(neighbor);
+                        break;
+                    }
                 }
             }
         }
 
-        // 3. Commit only the blocks we could afford
         if (!blocksToPlace.isEmpty()) {
             PreviewBlock.commitBuild(player, blocksToPlace);
-
-            // 4. Update the BlockEntity's memory with what's left
             this.buildSnapshots = remainingSnapshots;
-
-            // Recalculate cost based on remaining snapshots
             this.requiredItems = PreviewManager.calculateRequiredItemsFromMap(this.buildSnapshots);
-
         } else {
             player.sendSystemMessage(Component.literal("§cNot enough items to place any more blocks!"));
         }
 
-        // 5. Cleanup and Sync
         if (this.buildSnapshots.isEmpty()) {
             this.requiredItems.clear();
             player.closeContainer();

@@ -30,6 +30,11 @@ public class PreviewManager {
     public static final Map<UUID, Map<BlockPos, BuildSnapshot>> pendingCommit = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<UUID, Map<BlockPos, BlockState>> sessionChanges = new java.util.concurrent.ConcurrentHashMap<>();
 
+    private static final Map<UUID, Set<BlockPos>> secondaryBlocks = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static void markAsSecondaryBlock(UUID playerId, BlockPos pos) {
+        secondaryBlocks.computeIfAbsent(playerId, k -> new HashSet<>()).add(pos);
+    }
 
     public static class BuildSnapshot {
         public BlockState originalState;
@@ -84,7 +89,6 @@ public class PreviewManager {
         }
     }
 
-    // Update your calculator to handle the "Future" Air block
     public static Map<Item, Integer> calculateRequiredItems(ServerPlayer player, @Nullable BlockPos pendingAir) {
         UUID id = player.getUUID();
         Map<BlockPos, BuildSnapshot> totalBuild = pendingCommit.get(id);
@@ -93,11 +97,11 @@ public class PreviewManager {
         if (totalBuild == null) return requirements;
 
         totalBuild.forEach((pos, snapshot) -> {
-            // LATEST FIX: If this is the block we are currently breaking, treat it as AIR
             BlockState worldState = pos.equals(pendingAir) ? Blocks.AIR.defaultBlockState() : player.level().getBlockState(pos);
             BlockState originalState = snapshot.originalState;
 
             if (!worldState.equals(originalState) && !worldState.isAir()) {
+                if (isSecondaryHalf(worldState)) return; // skip head/upper halves
                 Item item = worldState.getBlock().asItem();
                 if (item != Items.AIR) {
                     requirements.put(item, requirements.getOrDefault(item, 0) + 1);
@@ -106,6 +110,8 @@ public class PreviewManager {
         });
         return requirements;
     }
+
+
 
     public static void startInventoryPreview(ServerPlayer player) {
         UUID id = player.getUUID();
@@ -157,9 +163,11 @@ public class PreviewManager {
         ));
     }
 
-    public static Map<Item, Integer> calculateRequiredItemsFromMap(Map<BlockPos, BuildSnapshot> buildData) {        Map<Item, Integer> requirements = new HashMap<>();
+    public static Map<Item, Integer> calculateRequiredItemsFromMap(Map<BlockPos, BuildSnapshot> buildData) {
+        Map<Item, Integer> requirements = new HashMap<>();
         buildData.forEach((pos, snapshot) -> {
             if (!snapshot.buildState.equals(snapshot.originalState) && !snapshot.buildState.isAir()) {
+                if (isSecondaryHalf(snapshot.buildState)) return; // skip head/upper halves
                 Item item = snapshot.buildState.getBlock().asItem();
                 if (item != Items.AIR) {
                     requirements.put(item, requirements.getOrDefault(item, 0) + 1);
@@ -167,6 +175,25 @@ public class PreviewManager {
             }
         });
         return requirements;
+    }
+
+    public static boolean isSecondaryHalf(BlockState state) {
+        // Beds: skip the HEAD part (foot is placed first, head is secondary)
+        if (state.getBlock() instanceof net.minecraft.world.level.block.BedBlock) {
+            return state.getValue(net.minecraft.world.level.block.BedBlock.PART)
+                    == net.minecraft.world.level.block.state.properties.BedPart.HEAD;
+        }
+        // Doors: skip the UPPER half
+        if (state.getBlock() instanceof net.minecraft.world.level.block.DoorBlock) {
+            return state.getValue(net.minecraft.world.level.block.DoorBlock.HALF)
+                    == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER;
+        }
+        // Tall plants (sunflower, lilac, rose bush, peony, tall grass, large fern)
+        if (state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.DOUBLE_BLOCK_HALF)) {
+            return state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.DOUBLE_BLOCK_HALF)
+                    == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER;
+        }
+        return false;
     }
 
     public static void enterPreview(ServerPlayer player, BlockPos pos) {
@@ -443,6 +470,8 @@ public class PreviewManager {
         sessionChanges.remove(id);
         playerAnchorPos.remove(id);
         previousGameModes.remove(id);
+        secondaryBlocks.remove(id);
+
         // Note: We keep pendingCommit so the 'shopping list' stays visible on the BE screen!
         player.displayClientMessage(Component.literal("§dExiting Build Mode"), true);
 

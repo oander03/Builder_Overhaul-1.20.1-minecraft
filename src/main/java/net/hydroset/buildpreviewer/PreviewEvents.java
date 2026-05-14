@@ -423,13 +423,11 @@ public class PreviewEvents {
             PreviewManager.recordChange(uuid, targetPos, currentState);
         }
     }
-
     @SubscribeEvent
     public static void onMultiBlockPlace(BlockEvent.EntityMultiPlaceEvent event) {
         if (event.getEntity() instanceof Player player) {
             UUID uuid = player.getUUID();
             if (PreviewManager.isInPreview(uuid)) {
-                // MultiPlaceEvent provides a list of all affected block snapshots
                 event.getReplacedBlockSnapshots().forEach(snapshot -> {
                     PreviewManager.recordChange(uuid, snapshot.getPos(), snapshot.getReplacedBlock());
                 });
