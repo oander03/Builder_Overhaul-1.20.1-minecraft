@@ -67,7 +67,14 @@ public class PreviewEvents {
             Items.ENDER_PEARL,
             Items.RESPAWN_ANCHOR,
             Items.TNT,
-            Items.ENDER_EYE
+            Items.ENDER_EYE,
+            Items.BUCKET,
+            Items.STRUCTURE_BLOCK,
+            Items.STRUCTURE_VOID,
+            Items.JIGSAW,
+            Items.LIGHT,
+            Items.DRAGON_EGG,
+            Items.REINFORCED_DEEPSLATE
     );
 
     private static final Set<net.minecraft.world.level.block.Block> BANNED_BLOCKS_TO_BREAK = Set.of(
@@ -83,7 +90,8 @@ public class PreviewEvents {
             Blocks.STRUCTURE_BLOCK,
             Blocks.JIGSAW,
             Blocks.LIGHT,
-            Blocks.END_GATEWAY
+            Blocks.END_GATEWAY,
+            Blocks.SCULK_SHRIEKER
             //Blocks.TRIAL_SPAWNER
     );
 
@@ -164,6 +172,12 @@ public class PreviewEvents {
 
             // Prevent interacting with portals
             if (targetedBlock.is(Blocks.NETHER_PORTAL) || targetedBlock.is(Blocks.END_PORTAL)) {
+                event.setCanceled(true);
+                return;
+            }
+
+// Block ALL interaction with Respawn Anchors (charging + detonation)
+            if (targetedBlock.is(Blocks.RESPAWN_ANCHOR)) {
                 event.setCanceled(true);
                 return;
             }
