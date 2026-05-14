@@ -374,10 +374,12 @@ public class PreviewEvents {
 
         if (!PreviewManager.isInPreview(uuid)) {
             if (isRealPlayer(player)) {
-                // stateBefore = AIR (or whatever was there), not the placed block
                 BlockState stateBefore = pendingPlacementState.remove(uuid);
-                PreviewManager.recordChange(uuid, event.getPos(),
-                        stateBefore != null ? stateBefore : Blocks.AIR.defaultBlockState());
+                // ✅ We want to record what the world NOW looks like at this pos
+                // (the newly placed block), not what was there before placement.
+                // originalState should reflect the real survival world state.
+                BlockState placedState = event.getPlacedBlock();
+                PreviewManager.recordChange(uuid, event.getPos(), placedState);
             }
             return;
         }
