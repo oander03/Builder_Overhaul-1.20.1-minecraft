@@ -492,11 +492,16 @@ public class PreviewEvents {
         }
         else {
 
-            PreviewManager.recordChange(player.getUUID(), event.getPos(), event.getState());
-
             BlockPos targetPos = event.getPos();
             BlockPos anchorPos = PreviewManager.getAnchorPos(player.getUUID());
             BlockState state = event.getState();
+
+            // Check if the block being broken is the specific anchor block
+            if (targetPos.equals(anchorPos)) {
+                event.setCanceled(true);
+                player.displayClientMessage(Component.literal("You cannot break the anchor block while in preview!"), true);
+                return;
+            }
 
             // --- NEW: Check Banned Blocks List ---
             if (BANNED_BLOCKS_TO_BREAK.contains(state.getBlock())) {
@@ -544,18 +549,13 @@ public class PreviewEvents {
                 }
             }
 
-            // Check if the block being broken is the specific anchor block
-            if (targetPos.equals(anchorPos)) {
-                event.setCanceled(true);
-                player.displayClientMessage(Component.literal("You cannot break the anchor block while in preview!"), true);
-            }
-
             // Check if ANY player in the world is currently using this block as their anchor
             boolean isBlockBusy = PreviewManager.getAllAnchorPositions().contains(targetPos);
 
             if (isBlockBusy) {
                 event.setCanceled(true);
                 event.getPlayer().displayClientMessage(Component.literal("§cThis block is currently locked in a Preview!"), true);
+                return;
             }
 
 // Change it to:
