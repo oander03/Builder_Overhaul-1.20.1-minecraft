@@ -97,17 +97,31 @@ public class PreviewManager {
         if (totalBuild == null) return requirements;
 
         totalBuild.forEach((pos, snapshot) -> {
-            BlockState worldState = pos.equals(pendingAir) ? Blocks.AIR.defaultBlockState() : player.level().getBlockState(pos);
+            BlockState worldState = pos.equals(pendingAir)
+                    ? Blocks.AIR.defaultBlockState()
+                    : player.level().getBlockState(pos);
             BlockState originalState = snapshot.originalState;
 
-            if (!worldState.equals(originalState) && !worldState.isAir()) {
-                if (isSecondaryHalf(worldState)) return; // skip head/upper halves
-                Item item = worldState.getBlock().asItem();
-                if (item != Items.AIR) {
-                    requirements.put(item, requirements.getOrDefault(item, 0) + 1);
-                }
+            // Skip if world hasn't changed from original
+            if (worldState.equals(originalState)) return;
+            if (worldState.isAir()) return;
+            if (isSecondaryHalf(worldState)) return;
+
+            Item item = worldState.getBlock().asItem();
+            if (item == Items.AIR) return;
+
+            // Count how many of this item are represented at this position
+            int buildCount = getStackCount(worldState);
+            int originalCount = (originalState.getBlock() == worldState.getBlock())
+                    ? getStackCount(originalState)
+                    : 0;
+            int delta = buildCount - originalCount;
+
+            if (delta > 0) {
+                requirements.merge(item, delta, Integer::sum);
             }
         });
+
         return requirements;
     }
 
@@ -165,15 +179,26 @@ public class PreviewManager {
 
     public static Map<Item, Integer> calculateRequiredItemsFromMap(Map<BlockPos, BuildSnapshot> buildData) {
         Map<Item, Integer> requirements = new HashMap<>();
+
         buildData.forEach((pos, snapshot) -> {
-            if (!snapshot.buildState.equals(snapshot.originalState) && !snapshot.buildState.isAir()) {
-                if (isSecondaryHalf(snapshot.buildState)) return; // skip head/upper halves
-                Item item = snapshot.buildState.getBlock().asItem();
-                if (item != Items.AIR) {
-                    requirements.put(item, requirements.getOrDefault(item, 0) + 1);
-                }
+            if (snapshot.buildState.equals(snapshot.originalState)) return;
+            if (snapshot.buildState.isAir()) return;
+            if (isSecondaryHalf(snapshot.buildState)) return;
+
+            Item item = snapshot.buildState.getBlock().asItem();
+            if (item == Items.AIR) return;
+
+            int buildCount = getStackCount(snapshot.buildState);
+            int originalCount = (snapshot.originalState.getBlock() == snapshot.buildState.getBlock())
+                    ? getStackCount(snapshot.originalState)
+                    : 0;
+            int delta = buildCount - originalCount;
+
+            if (delta > 0) {
+                requirements.merge(item, delta, Integer::sum);
             }
         });
+
         return requirements;
     }
 
@@ -294,6 +319,30 @@ public class PreviewManager {
             be.setBuildData(complexSnapshot, calculateRequiredItemsFromMap(complexSnapshot), id);
             be.setChanged();
         }
+    }
+
+    private static int getStackCount(BlockState state) {
+        if (state.isAir()) return 0;
+
+        // Candles: CANDLES property 1-4
+        if (state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.CANDLES)) {
+            return state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.CANDLES);
+        }
+        // Sea Pickles: PICKLES property 1-4
+        if (state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.PICKLES)) {
+            return state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.PICKLES);
+        }
+        // Turtle Eggs: EGGS property 1-4
+        if (state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.EGGS)) {
+            return state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.EGGS);
+        }
+        // Slabs: a DOUBLE slab = 2 items, single = 1
+        if (state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE)) {
+            return state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE)
+                    == net.minecraft.world.level.block.state.properties.SlabType.DOUBLE ? 2 : 1;
+        }
+
+        return 1;
     }
 
     public static Map<BlockPos, BlockState> getSessionChanges(UUID playerId) {
