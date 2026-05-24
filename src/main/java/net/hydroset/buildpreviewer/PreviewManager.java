@@ -2,6 +2,8 @@ package net.hydroset.buildpreviewer;
 
 import net.hydroset.buildpreviewer.block.PreviewBlock;
 import net.hydroset.buildpreviewer.block.entity.PreviewBlockEntity;
+import net.hydroset.buildpreviewer.hologram.HologramSyncPacket;
+import net.hydroset.buildpreviewer.hologram.ModNetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
@@ -14,6 +16,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraftforge.network.PacketDistributor;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -286,6 +289,8 @@ public class PreviewManager {
 
         startInventoryPreview(player); // now playerAnchorPos.get(id) returns pos correctly
 
+        sendHologramUpdate(player);
+
         restorePendingBuild(player);
         player.setGameMode(GameType.CREATIVE);
         player.displayClientMessage(Component.literal("§aEntering Build Mode"), true);
@@ -319,6 +324,36 @@ public class PreviewManager {
             be.setBuildData(complexSnapshot, calculateRequiredItemsFromMap(complexSnapshot), id);
             be.setChanged();
         }
+    }
+
+    public static void sendHologramUpdate(ServerPlayer player) {
+        UUID id = player.getUUID();
+        Map<BlockPos, BuildSnapshot> snapshot = pendingCommit.get(id);
+
+        Map<BlockPos, HologramSyncPacket.HologramEntry> entries = new java.util.HashMap<>();
+
+        if (snapshot != null) {
+            snapshot.forEach((pos, snap) -> {
+                boolean buildIsAir = snap.buildState.isAir();
+                boolean originalIsAir = snap.originalState.isAir();
+
+                if (buildIsAir && originalIsAir) return; // nothing changed
+
+                if (!buildIsAir && !snap.buildState.equals(snap.originalState)) {
+                    // Block was PLACED  → blue ghost at this position showing the placed block
+                    entries.put(pos, new HologramSyncPacket.HologramEntry(snap.buildState, true));
+                } else if (buildIsAir && !originalIsAir) {
+                    // Block was BROKEN  → red ghost at this position showing what used to be there
+                    entries.put(pos, new HologramSyncPacket.HologramEntry(snap.originalState, false));
+                }
+            });
+        }
+
+        // Send to the specific player (empty map = clear all holograms)
+        ModNetwork.CHANNEL.send(
+                PacketDistributor.PLAYER.with(() -> player),
+                new HologramSyncPacket(entries)
+        );
     }
 
     private static int getStackCount(BlockState state) {
@@ -470,6 +505,9 @@ public class PreviewManager {
                 be.updateBlock();
             }
         }
+
+        sendHologramUpdate(player);
+
     }
 
     public static void forceSessionEntry(UUID playerId, BlockPos pos, BlockState originalState) {
@@ -483,6 +521,11 @@ public class PreviewManager {
         Level level = player.level();
         BlockPos anchor = playerAnchorPos.get(id);
         lastSyncTime.remove(id);
+        // 3. Top of exitPreview() — BEFORE the rollback loop (to clear ghosts):
+        sendHologramUpdate(player);   // sends empty map since pendingCommit is about to clear
+// ... but actually call it with an empty map explicitly:
+        ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                new HologramSyncPacket(new HashMap<>()));
 
         resetCache();
 

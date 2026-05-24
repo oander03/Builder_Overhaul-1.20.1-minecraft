@@ -1,6 +1,7 @@
 package net.hydroset.buildpreviewer;
 
 import net.hydroset.buildpreviewer.block.entity.ModBlockEntities;
+import net.hydroset.buildpreviewer.hologram.ModNetwork;
 import net.hydroset.buildpreviewer.item.ModItems;
 import net.hydroset.buildpreviewer.block.ModBlocks;
 import com.mojang.logging.LogUtils;
@@ -51,6 +52,9 @@ public class BuildPreviewer
 
         // 2. IMPORTANT: Initialize the Networking Channel
         ModMessages.register();
+
+        ModNetwork.register(); // ← add this in your constructor
+
 
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);
@@ -106,4 +110,6 @@ public class BuildPreviewer
 
         }
     }
+
+
 }
