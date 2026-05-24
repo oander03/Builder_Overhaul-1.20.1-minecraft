@@ -168,7 +168,6 @@ public class PreviewEvents {
     public static void onInteract(PlayerInteractEvent.RightClickBlock event) {
         if (PreviewManager.isInPreview(event.getEntity().getUUID())) {
             Item item = event.getItemStack().getItem();
-
             BlockState targetedBlock = event.getLevel().getBlockState(event.getPos());
 
             // Prevent interacting with portals
@@ -177,18 +176,27 @@ public class PreviewEvents {
                 return;
             }
 
-// Block ALL interaction with Respawn Anchors (charging + detonation)
+            // Block ALL interaction with Respawn Anchors
             if (targetedBlock.is(Blocks.RESPAWN_ANCHOR)) {
                 event.setCanceled(true);
                 return;
             }
 
+            // Block any block that opens a GUI/menu (anvils, crafting tables,
+            // enchanting tables, grindstones, looms, etc.) but has no block entity
+            // (those are caught separately). This covers all vanilla interactive blocks.
+            BlockPos pos = event.getPos();
+            Level level = event.getLevel();
+            if (targetedBlock.getMenuProvider(level, pos) != null) {
+                event.setCanceled(true);
+                event.setUseBlock(net.minecraftforge.eventbus.api.Event.Result.DENY);
+                return;
+            }
+
             // If it's in your list, stop EVERYTHING.
-            // No animations, no sound, no spawning.
             if (BANNED_ITEMS.contains(item)) {
                 event.setCanceled(true);
                 event.setUseItem(net.minecraftforge.eventbus.api.Event.Result.DENY);
-                return;
             }
         }
     }
@@ -682,18 +690,12 @@ public class PreviewEvents {
     @SubscribeEvent
     public static void onFallingBlock(EntityJoinLevelEvent event) {
         if (event.getEntity() instanceof FallingBlockEntity fallingBlock) {
-            // Check if the block is Dripstone, Sand, or Gravel
-            if (fallingBlock.getBlockState().is(Blocks.POINTED_DRIPSTONE) ||
-                    fallingBlock.getBlockState().is(BlockTags.SAND)) {
+            BlockPos pos = fallingBlock.blockPosition();
 
-                BlockPos pos = fallingBlock.blockPosition();
-
-                // If it's falling within the protection radius of an anchor
-                for (BlockPos anchor : PreviewManager.getAllAnchorPositions()) {
-                    if (pos.closerThan(anchor, 15)) { // 15 block protection radius
-                        event.setCanceled(true); // Vaporize the falling block
-                        return;
-                    }
+            for (BlockPos anchor : PreviewManager.getAllAnchorPositions()) {
+                if (pos.closerThan(anchor, 15)) {
+                    event.setCanceled(true);
+                    return;
                 }
             }
         }
@@ -715,14 +717,12 @@ public class PreviewEvents {
         if (PreviewManager.isInPreview(player.getUUID())) {
             BlockPos clickedPos = event.getPos();
             Level level = event.getLevel();
-            // 1. Define your "No-Build Zone" radius (e.g., 5 blocks)
-            double radius = 5.0;
 
-            // 2. Search for any players (excluding the builder themselves) near the clicked block
-            // We use AABB (Axis Aligned Bounding Box) to define the search area
+            // No-build zone check
+            double radius = 5.0;
             List<Player> nearbyPlayers = level.getEntitiesOfClass(Player.class,
                     new AABB(clickedPos).inflate(radius),
-                    p -> p != player); // Don't count the person actually building
+                    p -> p != player);
 
             if (!nearbyPlayers.isEmpty()) {
                 event.setCanceled(true);
@@ -732,22 +732,28 @@ public class PreviewEvents {
                 return;
             }
 
-            ItemStack stack = player.getItemInHand(event.getHand());
-
-            // 1. Allow the Anchor Block always
+            // Always allow interacting with the anchor block itself
             if (event.getPos().equals(PreviewManager.getAnchorPos(player.getUUID()))) return;
 
-            // 2. UNIVERSAL RULE: If it's not a block, block it.
-            // This stops modded "Fire Staves", "Destruction Wands", etc.
-            if (!(stack.getItem() instanceof BlockItem)) {
+            // Block interaction with any block entity (chests, furnaces, etc.)
+            // but NOT anvils, crafting tables, or other "use" blocks without inventories
+            if (event.getLevel().getBlockEntity(event.getPos()) != null && !(player.isSecondaryUseActive())) {
                 event.setCanceled(true);
                 return;
             }
 
-            // 3. Prevent clicking on other TileEntities (Chests/Machines from any mod)
-            if (event.getLevel().getBlockEntity(event.getPos()) != null && !(player.isSecondaryUseActive())) {
+            // Only block non-BlockItem usage if the clicked block is a plain block
+            // (i.e. not an interactive block like anvil, crafting table, enchanting table)
+            ItemStack stack = player.getItemInHand(event.getHand());
+            BlockState clickedState = level.getBlockState(clickedPos);
+
+            boolean isInteractiveBlock = clickedState.getMenuProvider(level, clickedPos) != null
+                    || clickedState.is(net.minecraft.tags.BlockTags.DOORS)
+                    || clickedState.is(net.minecraft.tags.BlockTags.TRAPDOORS)
+                    || clickedState.is(net.minecraft.tags.BlockTags.FENCE_GATES);
+
+            if (!isInteractiveBlock && !(stack.getItem() instanceof BlockItem)) {
                 event.setCanceled(true);
-                return;
             }
         }
     }

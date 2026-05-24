@@ -371,10 +371,6 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         return gm;
     }
 
-    public boolean hasSavedGameMode() {
-        return this.savedGameMode != null;
-    }
-
     // Lightweight client sync — skip build snapshots entirely
     @Override
     public @NotNull CompoundTag getUpdateTag() {

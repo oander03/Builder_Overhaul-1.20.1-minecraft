@@ -641,7 +641,9 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
                 .bounds(startX, buttonY, finalizeWidth, 20)
                 .tooltip(Tooltip.create(Component.literal("Commit the blueprint and place all blocks into the world.")))
                 .build();
-        this.finalizeButton.active = !net.hydroset.buildpreviewer.PreviewManager.isInPreview(this.minecraft.player.getUUID());
+        Map<net.minecraft.world.item.Item, Integer> required = this.menu.getBlockEntity().getRequiredItems();
+        boolean hasContent = required != null && !required.isEmpty();
+        this.finalizeButton.active = !net.hydroset.buildpreviewer.PreviewManager.isInPreview(this.minecraft.player.getUUID()) && hasContent;
         this.addRenderableWidget(this.finalizeButton);
 
 // 2. Toggle Button
@@ -674,5 +676,10 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
                 ? Tooltip.create(Component.literal("Exit and return world back to normal."))
                 : Tooltip.create(Component.literal("Go into a creative builder mode to build a blueprint."))
         );
+
+        // Disable finalize if in preview, or if there's nothing to finalize
+        Map<Item, Integer> required = this.menu.getBlockEntity().getRequiredItems();
+        boolean hasContent = required != null && !required.isEmpty();
+        this.finalizeButton.active = !inPreview && hasContent;
     }
 }
