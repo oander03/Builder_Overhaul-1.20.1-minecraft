@@ -74,7 +74,8 @@ public class PreviewEvents {
             Items.JIGSAW,
             Items.LIGHT,
             Items.DRAGON_EGG,
-            Items.REINFORCED_DEEPSLATE
+            Items.REINFORCED_DEEPSLATE,
+            Items.TURTLE_EGG
     );
 
     private static final Set<net.minecraft.world.level.block.Block> BANNED_BLOCKS_TO_BREAK = Set.of(

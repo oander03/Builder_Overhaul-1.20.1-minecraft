@@ -324,6 +324,11 @@ public class PreviewManager {
     private static int getStackCount(BlockState state) {
         if (state.isAir()) return 0;
 
+        // Slabs: a DOUBLE slab = 2 items, single = 1
+        if (state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE)) {
+            return state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE)
+                    == net.minecraft.world.level.block.state.properties.SlabType.DOUBLE ? 2 : 1;
+        }
         // Candles: CANDLES property 1-4
         if (state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.CANDLES)) {
             return state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.CANDLES);
@@ -336,12 +341,6 @@ public class PreviewManager {
         if (state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.EGGS)) {
             return state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.EGGS);
         }
-        // Slabs: a DOUBLE slab = 2 items, single = 1
-        if (state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE)) {
-            return state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE)
-                    == net.minecraft.world.level.block.state.properties.SlabType.DOUBLE ? 2 : 1;
-        }
-
         return 1;
     }
 
