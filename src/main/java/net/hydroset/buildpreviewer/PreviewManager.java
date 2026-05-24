@@ -296,6 +296,10 @@ public class PreviewManager {
         }
     }
 
+    public static Map<BlockPos, BlockState> getSessionChanges(UUID playerId) {
+        return sessionChanges.get(playerId);
+    }
+
     public static void tryRehydrateOnLogin(ServerPlayer player) {
         UUID id = player.getUUID();
         net.minecraft.server.level.ServerLevel level =

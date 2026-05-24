@@ -421,10 +421,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     @Override
     public void load(CompoundTag tag) {
         super.load(tag);
-        this.buildSnapshots.clear();
-        this.requiredItems.clear();
 
-        // Use the specific registry lookup for the current world state
         var lookup = this.level != null ?
                 this.level.holderLookup(Registries.BLOCK) :
                 net.minecraft.core.registries.BuiltInRegistries.BLOCK.asLookup();
@@ -432,7 +429,6 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         if (tag.contains("SavedPlayerInventory")) {
             this.savedPlayerInventory = tag.getList("SavedPlayerInventory", 10);
         }
-
         if (tag.contains("SavedGameMode")) {
             this.savedGameMode = GameType.byId(tag.getInt("SavedGameMode"));
         }
@@ -443,16 +439,12 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
             for (int i = 0; i < snapshotList.size(); i++) {
                 CompoundTag entryTag = snapshotList.getCompound(i);
                 BlockPos pos = BlockPos.of(entryTag.getLong("pos"));
-
-                // Read states using the lookup
                 BlockState original = NbtUtils.readBlockState(lookup, entryTag.getCompound("original"));
                 BlockState build = NbtUtils.readBlockState(lookup, entryTag.getCompound("build"));
-
                 this.buildSnapshots.put(pos, new PreviewManager.BuildSnapshot(original, build));
             }
         }
 
-        // Load your Required Items
         if (tag.contains("RequiredItems")) {
             this.requiredItems.clear();
             CompoundTag itemsTag = tag.getCompound("RequiredItems");
@@ -468,18 +460,16 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
             }
         }
 
-        // ADD THIS LINE: This puts the items back into the slots
         if (tag.contains("Inventory")) {
-            ListTag inventoryList = tag.getList("Inventory", 10); // 10 = CompoundTag
+            ListTag inventoryList = tag.getList("Inventory", 10);
             for (int i = 0; i < inventoryList.size(); i++) {
                 CompoundTag slotTag = inventoryList.getCompound(i);
                 int slot = slotTag.getInt("Slot");
                 ResourceLocation itemId = new ResourceLocation(slotTag.getString("Item"));
                 Item item = ForgeRegistries.ITEMS.getValue(itemId);
-                int count = slotTag.getInt("Count"); // int, not byte!
+                int count = slotTag.getInt("Count");
                 if (item != null && item != Items.AIR && slot < itemHandler.getSlots()) {
-                    ItemStack stack = new ItemStack(item, count);
-                    itemHandler.setStackInSlot(slot, stack);
+                    itemHandler.setStackInSlot(slot, new ItemStack(item, count));
                 }
             }
         }

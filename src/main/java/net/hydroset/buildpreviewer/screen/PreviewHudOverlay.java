@@ -328,7 +328,7 @@ public class PreviewHudOverlay {
                         new net.hydroset.buildpreviewer.networking.RemoveRequiredItemPacket(anchor, clickedItem)
                 );
 
-                lastRequirementsHash = 0; // force cache rebuild on next render
+                resetCache();
                 return;
             }
         }

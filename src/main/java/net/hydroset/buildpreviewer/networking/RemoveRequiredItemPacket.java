@@ -42,7 +42,6 @@ public class RemoveRequiredItemPacket {
             if (player == null) return;
 
             Level level = player.level();
-
             if (!(level.getBlockEntity(anchorPos) instanceof PreviewBlockEntity be)) return;
 
             Item item = ForgeRegistries.ITEMS.getValue(itemId);
@@ -50,35 +49,41 @@ public class RemoveRequiredItemPacket {
 
             UUID playerId = player.getUUID();
 
-            // 1. Find all snapshots in pendingCommit where the buildState matches this item
+            // 1. Roll back affected blocks in the world and remove from pendingCommit
             Map<BlockPos, PreviewManager.BuildSnapshot> pendingMap = PreviewManager.pendingCommit.get(playerId);
             if (pendingMap != null) {
                 List<BlockPos> toRemove = new ArrayList<>();
-
                 pendingMap.forEach((pos, snapshot) -> {
-                    Item snapshotItem = snapshot.buildState.getBlock().asItem();
-                    if (snapshotItem == item) {
-                        // Roll back this block to its original state in the world
+                    if (snapshot.buildState.getBlock().asItem() == item) {
                         if (level.hasChunkAt(pos)) {
                             level.setBlock(pos, snapshot.originalState, 2 | 16 | 32);
                         }
                         toRemove.add(pos);
                     }
                 });
-
-                // 2. Remove them from pendingCommit
                 toRemove.forEach(pendingMap::remove);
             }
 
-            // 3. Do the same in the BlockEntity's buildSnapshots
-            Map<BlockPos, PreviewManager.BuildSnapshot> snapshots = be.getBuildSnapshots();
-            snapshots.entrySet().removeIf(entry ->
-                    entry.getValue().buildState.getBlock().asItem() == item
-            );
+            // 2. Also remove from sessionChanges so it doesn't get re-added on next recordAndSync
+            Map<BlockPos, net.minecraft.world.level.block.state.BlockState> sessionMap =
+                    PreviewManager.getSessionChanges(playerId);
+            if (sessionMap != null && pendingMap != null) {
+                // Remove session entries that no longer exist in pendingCommit
+                sessionMap.entrySet().removeIf(e -> !pendingMap.containsKey(e.getKey()));
+            }
 
-            // 4. Recalculate cost from what remains and sync
-            Map<Item, Integer> newCost = PreviewManager.calculateRequiredItemsFromMap(snapshots);
-            be.setRequiredItems(newCost, playerId);
+            // 3. Sync BE with the cleaned pendingCommit — same as recordAndSync does
+            Map<BlockPos, PreviewManager.BuildSnapshot> snapshots = be.getBuildSnapshots();
+            snapshots.entrySet().removeIf(e -> e.getValue().buildState.getBlock().asItem() == item);
+
+            Map<Item, Integer> newCost = PreviewManager.calculateRequiredItemsFromMap(
+                    pendingMap != null ? pendingMap : snapshots
+            );
+            be.setBuildData(
+                    pendingMap != null ? pendingMap : snapshots,
+                    newCost,
+                    playerId
+            );
             be.updateBlock();
         });
         ctx.get().setPacketHandled(true);
