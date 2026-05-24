@@ -77,9 +77,44 @@ public class PreviewHudOverlay {
         cachedIndexMap = new HashMap<>();
         lastRequirementsHash = 0;
         lastCountUpdate = 0;
+        sliderValue = -1f; // reset so it re-reads from world on next preview entry
+        sliderDragging = false;
+        dayTimeField = null;
+        dayTimeFieldOwner = null;
+        inventoryAlpha = 1.0f;
     }
 
-    // ✅ onRenderOverlay is completely gone
+
+    @SubscribeEvent
+    public static void onPacketReceived(net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingIn event) {
+        // reset on login
+        dayTimeField = null;
+        dayTimeFieldOwner = null;
+        sliderValue = -1f;
+    }
+
+    @SubscribeEvent(priority = net.minecraftforge.eventbus.api.EventPriority.HIGHEST)
+    public static void onRenderTick(net.minecraftforge.event.TickEvent.RenderTickEvent event) {
+        if (event.phase != net.minecraftforge.event.TickEvent.Phase.START) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
+        if (!PreviewManager.isInPreview(mc.player.getUUID())) return;
+        if (sliderValue < 0f) return;
+
+        long newTime = (long)(sliderValue * 24000);
+        applyClientTime(mc, newTime);
+    }
+
+    @SubscribeEvent
+    public static void onClientTick(net.minecraftforge.event.TickEvent.ClientTickEvent event) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
+        if (!PreviewManager.isInPreview(mc.player.getUUID())) return;
+        if (sliderValue < 0f) return;
+
+        long newTime = (long)(sliderValue * 24000);
+        applyClientTime(mc, newTime);
+    }
 
     @SubscribeEvent
     public static void onScreenRender(net.minecraftforge.client.event.ScreenEvent.Render.Post event) {
@@ -89,7 +124,9 @@ public class PreviewHudOverlay {
             if (!cachedItemList.isEmpty()) resetCache();
             return;
         }
-        if (!(event.getScreen() instanceof AbstractContainerScreen)) return;
+        if (!(event.getScreen() instanceof AbstractContainerScreen containerScreen)) return;
+        if (!(containerScreen instanceof net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen)
+                && !(containerScreen.getMenu() instanceof net.minecraft.world.inventory.InventoryMenu)) return;
 
         BlockPos anchor = PreviewManager.getAnchorPos(mc.player.getUUID());
         if (anchor == null) return;
@@ -125,67 +162,209 @@ public class PreviewHudOverlay {
         }
     }
 
+    private static float inventoryAlpha = 1.0f;
+
+    // Replace the two placeholder fields with these
+    private static int sliderX, sliderY, sliderW = 94, sliderH = 20;
+    private static boolean sliderDragging = false;
+    private static float sliderValue = -1f; // -1 means "uninitialized, read from world"
+
     private static void renderHudButtons(GuiGraphics guiGraphics, Minecraft mc, int mouseX, int mouseY) {
         int screenW = mc.getWindow().getGuiScaledWidth();
         int screenH = mc.getWindow().getGuiScaledHeight();
-
         int margin = 6;
         int btnGap = 3;
 
-        // Anchor both buttons to bottom-right
-        hudBtnExitW = 90; hudBtnExitH = 14;
-        hudBtnPlaceholderW = 90; hudBtnPlaceholderH = 14;
+        hudBtnExitW = 94; hudBtnExitH = 20;
+        sliderW = 94; sliderH = 20;
 
         hudBtnExitX = screenW - hudBtnExitW - margin;
         hudBtnExitY = screenH - hudBtnExitH - margin;
-        hudBtnPlaceholderX = screenW - hudBtnPlaceholderW - margin;
-        hudBtnPlaceholderY = hudBtnExitY - hudBtnPlaceholderH - btnGap;
+        sliderX = screenW - sliderW - margin;
+        sliderY = hudBtnExitY - sliderH - btnGap;
 
         hudBtnExitHovered = mouseX >= hudBtnExitX && mouseX < hudBtnExitX + hudBtnExitW
                 && mouseY >= hudBtnExitY && mouseY < hudBtnExitY + hudBtnExitH;
-        hudBtnPlaceholderHovered = mouseX >= hudBtnPlaceholderX && mouseX < hudBtnPlaceholderX + hudBtnPlaceholderW
-                && mouseY >= hudBtnPlaceholderY && mouseY < hudBtnPlaceholderY + hudBtnPlaceholderH;
 
-        RenderSystem.enableBlend();
+        // Initialize slider from current world time if not yet set
+        if (sliderValue < 0f && mc.level != null) {
+            sliderValue = (mc.level.getDayTime() % 24000) / 24000f;
+        }
 
-        // Exit Preview button
-        drawHudButton(guiGraphics, mc, hudBtnExitX, hudBtnExitY, hudBtnExitW, hudBtnExitH,
-                "⛏ Exit Preview", hudBtnExitHovered,
-                0xCC3A2410, 0xCC5A3E2B, 0xFFFFEECC, 0xFF6B4C2A);   // warm brown — matches titlebar
-
-        // Placeholder button
-        drawHudButton(guiGraphics, mc, hudBtnPlaceholderX, hudBtnPlaceholderY, hudBtnPlaceholderW, hudBtnPlaceholderH,
-                "✦ (Placeholder)", hudBtnPlaceholderHovered,
-                0xCC1A2A1A, 0xCC2A4A2A, 0xFFAAEEAA, 0xFF3A6A3A);   // muted green
-
-        RenderSystem.disableBlend();
+        drawVanillaButton(guiGraphics, mc, hudBtnExitX, hudBtnExitY, hudBtnExitW, hudBtnExitH,
+                "⛏ Exit Builder", hudBtnExitHovered);
+        drawTimeSlider(guiGraphics, mc, mouseX, mouseY);
     }
 
-    private static void drawHudButton(GuiGraphics guiGraphics, Minecraft mc,
-                                      int x, int y, int w, int h,
-                                      String label, boolean hovered,
-                                      int bgDark, int bgLight, int textColor, int borderColor) {
+    private static void drawTimeSlider(GuiGraphics guiGraphics, Minecraft mc, int mouseX, int mouseY) {
+        net.minecraft.resources.ResourceLocation WIDGETS =
+                new net.minecraft.resources.ResourceLocation("textures/gui/widgets.png");
 
-        int bg = hovered ? bgLight : bgDark;
+        RenderSystem.setShader(net.minecraft.client.renderer.GameRenderer::getPositionTexShader);
+        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        RenderSystem.enableBlend();
 
-        // Background fill
-        guiGraphics.fill(x, y, x + w, y + h, bg);
+        // Update drag state based on live mouse position + button held
+        boolean mouseDown = net.minecraft.client.gui.screens.Screen.hasControlDown()
+                ? false // don't interfere with ctrl+clicks
+                : (org.lwjgl.glfw.GLFW.glfwGetMouseButton(
+                mc.getWindow().getWindow(),
+                org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT) == org.lwjgl.glfw.GLFW.GLFW_PRESS);
 
-        // 1px border — top/left lighter, bottom/right darker (classic MC bevel)
-        int borderBright = borderColor;
-        int borderShadow = borderColor & 0xFF000000 | ((borderColor & 0x00FEFEFE) >> 1); // half-brightness
-        guiGraphics.fill(x,         y,         x + w,     y + 1,     borderBright); // top
-        guiGraphics.fill(x,         y,         x + 1,     y + h,     borderBright); // left
-        guiGraphics.fill(x,         y + h - 1, x + w,     y + h,     borderShadow); // bottom
-        guiGraphics.fill(x + w - 1, y,         x + w,     y + h,     borderShadow); // right
+        if (sliderDragging && !mouseDown) {
+            sliderDragging = false;
+        }
 
-        // Centered label
+// Set target alpha based on drag state
+        float targetAlpha = sliderDragging ? 0.15f : 1.0f;
+        inventoryAlpha += (targetAlpha - inventoryAlpha) * 0.2f; // smooth lerp
+        if (Math.abs(inventoryAlpha - targetAlpha) < 0.01f) inventoryAlpha = targetAlpha;
+
+        if (sliderDragging || (mouseDown
+                && mouseX >= sliderX && mouseX < sliderX + sliderW
+                && mouseY >= sliderY && mouseY < sliderY + sliderH)) {
+            sliderDragging = mouseDown;
+            if (mouseDown) {
+                sliderValue = (float)(mouseX - sliderX) / sliderW;
+                sliderValue = Math.max(0f, Math.min(1f, sliderValue));
+            }
+        }
+
+        // Draw slider track
+        int halfW = sliderW / 2;
+        guiGraphics.blit(WIDGETS, sliderX,         sliderY, 0,                      66, halfW,          sliderH, 256, 256);
+        guiGraphics.blit(WIDGETS, sliderX + halfW, sliderY, 200 - (sliderW - halfW), 66, sliderW - halfW, sliderH, 256, 256);
+
+        // Draw handle
+        int handleW = 8;
+        int handleX = sliderX + (int)(sliderValue * (sliderW - handleW));
+        guiGraphics.blit(WIDGETS, handleX,              sliderY, 0,                 86, handleW / 2, sliderH, 256, 256);
+        guiGraphics.blit(WIDGETS, handleX + handleW / 2, sliderY, 200 - handleW / 2, 86, handleW / 2, sliderH, 256, 256);
+
+        // Label
+        long ticks = (long)(sliderValue * 24000);
+        long displayTime = (ticks + 6000) % 24000;
+        int hours = (int)(displayTime / 1000);
+        int minutes = (int)((displayTime % 1000) * 60 / 1000);
+        String timeLabel = String.format("☀ %02d:%02d", hours, minutes);
+
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0, 0, 300.0f);
+        int textX = sliderX + (sliderW - mc.font.width(timeLabel)) / 2;
+        int textY = sliderY + (sliderH - mc.font.lineHeight) / 2 + 1;
+        guiGraphics.drawString(mc.font, timeLabel, textX, textY, 0xFFFFFF, true);
+        guiGraphics.pose().popPose();
+
+        RenderSystem.disableBlend();
+
+        // Apply time to client level every frame (not just while dragging)
+        // This also keeps it locked when the server sends time updates
+        if (mc.level != null && sliderValue >= 0f) {
+            long newTime = (long)(sliderValue * 24000);
+            applyClientTime(mc, newTime);
+        }
+    }
+
+    private static java.lang.reflect.Field dayTimeField = null;
+    private static Object dayTimeFieldOwner = null; // the ClientLevelData instance
+
+    private static void applyClientTime(Minecraft mc, long newTime) {
+        net.minecraft.client.multiplayer.ClientLevel level =
+                (net.minecraft.client.multiplayer.ClientLevel) mc.level;
+        if (level == null) return;
+
+        // Find and cache the field on first call or when level changes
+        if (dayTimeField == null || dayTimeFieldOwner == null) {
+            long currentTime = level.getDayTime();
+
+            // First try fields on ClientLevel itself
+            for (java.lang.reflect.Field field : getAllFields(level.getClass())) {
+                if (field.getType() != long.class) continue;
+                field.setAccessible(true);
+                try {
+                    if (field.getLong(level) == currentTime) {
+                        dayTimeField = field;
+                        dayTimeFieldOwner = level;
+                        break;
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // If not found on level, check all object fields on ClientLevel for a nested object
+            // that contains the dayTime (this is ClientLevelData)
+            if (dayTimeField == null) {
+                for (java.lang.reflect.Field objField : getAllFields(level.getClass())) {
+                    if (objField.getType().isPrimitive() || objField.getType() == String.class) continue;
+                    objField.setAccessible(true);
+                    try {
+                        Object obj = objField.get(level);
+                        if (obj == null) continue;
+                        for (java.lang.reflect.Field innerField : getAllFields(obj.getClass())) {
+                            if (innerField.getType() != long.class) continue;
+                            innerField.setAccessible(true);
+                            try {
+                                if (innerField.getLong(obj) == currentTime) {
+                                    dayTimeField = innerField;
+                                    dayTimeFieldOwner = obj;
+                                    break;
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                    } catch (Exception ignored) {}
+                    if (dayTimeField != null) break;
+                }
+            }
+        }
+
+        // Apply the time
+        // Apply the time
+        if (dayTimeField != null && dayTimeFieldOwner != null) {
+            try {
+                // Re-verify the field still holds a plausible dayTime value before writing
+                long currentVal = dayTimeField.getLong(dayTimeFieldOwner);
+                // If the server just wrote a wildly different value, our cached field is still right
+                // Just overwrite unconditionally
+                dayTimeField.setLong(dayTimeFieldOwner, newTime);
+            } catch (Exception e) {
+                dayTimeField = null;
+                dayTimeFieldOwner = null;
+            }
+        }
+    }
+
+    private static java.util.List<java.lang.reflect.Field> getAllFields(Class<?> clazz) {
+        java.util.List<java.lang.reflect.Field> fields = new java.util.ArrayList<>();
+        while (clazz != null && clazz != Object.class) {
+            fields.addAll(java.util.Arrays.asList(clazz.getDeclaredFields()));
+            clazz = clazz.getSuperclass();
+        }
+        return fields;
+    }
+
+    private static void drawVanillaButton(GuiGraphics guiGraphics, Minecraft mc,
+                                          int x, int y, int w, int h,
+                                          String label, boolean hovered) {
+        RenderSystem.setShader(net.minecraft.client.renderer.GameRenderer::getPositionTexShader);
+        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        RenderSystem.enableBlend();
+
+        net.minecraft.resources.ResourceLocation WIDGETS =
+                new net.minecraft.resources.ResourceLocation("textures/gui/widgets.png");
+
+        int v = hovered ? 86 : 66;
+        int halfW = w / 2;
+        guiGraphics.blit(WIDGETS, x,         y, 0,                v, halfW,      h, 256, 256);
+        guiGraphics.blit(WIDGETS, x + halfW, y, 200 - (w - halfW), v, w - halfW, h, 256, 256);
+
+        int textColor = hovered ? 0xFFFFA0 : 0xFFFFFF;
         guiGraphics.pose().pushPose();
         guiGraphics.pose().translate(0, 0, 300.0f);
         int textX = x + (w - mc.font.width(label)) / 2;
         int textY = y + (h - mc.font.lineHeight) / 2 + 1;
         guiGraphics.drawString(mc.font, label, textX, textY, textColor, true);
         guiGraphics.pose().popPose();
+
+        RenderSystem.disableBlend();
     }
 
     private static void renderHud(GuiGraphics guiGraphics, Minecraft mc, PreviewBlockEntity previewBE, int mouseX, int mouseY) {
@@ -273,11 +452,40 @@ public class PreviewHudOverlay {
     }
 
     @SubscribeEvent
+    public static void onScreenRenderPre(net.minecraftforge.client.event.ScreenEvent.Render.Pre event) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || !PreviewManager.isInPreview(mc.player.getUUID())) return;
+        if (!(event.getScreen() instanceof AbstractContainerScreen containerScreen)) return;
+        if (!(containerScreen instanceof net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen)
+                && !(containerScreen.getMenu() instanceof net.minecraft.world.inventory.InventoryMenu)) return;
+
+        if (inventoryAlpha < 0.999f) {
+            RenderSystem.enableBlend();
+            RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, inventoryAlpha);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onScreenRenderPost(net.minecraftforge.client.event.ScreenEvent.Render.Post event) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || !PreviewManager.isInPreview(mc.player.getUUID())) return;
+        if (!(event.getScreen() instanceof AbstractContainerScreen containerScreen)) return;
+        if (!(containerScreen instanceof net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen)
+                && !(containerScreen.getMenu() instanceof net.minecraft.world.inventory.InventoryMenu)) return;
+
+        // Always restore full color after the screen finishes rendering
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
+        RenderSystem.disableBlend();
+    }
+
+    @SubscribeEvent
     public static void onScreenMouseClick(net.minecraftforge.client.event.ScreenEvent.MouseButtonPressed.Post event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
         if (!PreviewManager.isInPreview(mc.player.getUUID())) return;
-        if (!(event.getScreen() instanceof AbstractContainerScreen)) return;
+        if (!(event.getScreen() instanceof AbstractContainerScreen containerScreen)) return;
+        if (!(containerScreen instanceof net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen)
+                && !(containerScreen.getMenu() instanceof net.minecraft.world.inventory.InventoryMenu)) return;
 
         int mouseX = (int) event.getMouseX();
         int mouseY = (int) event.getMouseY();
@@ -291,13 +499,6 @@ public class PreviewHudOverlay {
                         new net.hydroset.buildpreviewer.networking.TogglePreviewPacket(anchor));
                 mc.player.closeContainer();
             }
-            return;
-        }
-
-        if (mouseX >= hudBtnPlaceholderX && mouseX < hudBtnPlaceholderX + hudBtnPlaceholderW
-                && mouseY >= hudBtnPlaceholderY && mouseY < hudBtnPlaceholderY + hudBtnPlaceholderH) {
-            // Placeholder action — replace with whatever you need later
-            mc.player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§e(Placeholder button pressed)"));
             return;
         }
 
