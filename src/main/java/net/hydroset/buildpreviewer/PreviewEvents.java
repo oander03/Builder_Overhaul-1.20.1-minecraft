@@ -478,6 +478,33 @@ public class PreviewEvents {
         }
     }
 
+    @SubscribeEvent
+    public static void onItemEntitySpawn(EntityJoinLevelEvent event) {
+        if (!(event.getEntity() instanceof net.minecraft.world.entity.item.ItemEntity)) return;
+        if (event.getLevel().isClientSide()) return;
+
+        BlockPos spawnPos = event.getEntity().blockPosition();
+
+        for (UUID playerId : PreviewManager.getAllActivePlayers()) {
+            // Only suppress drops for players who are currently IN preview
+            if (!PreviewManager.isInPreview(playerId)) continue;
+
+            Map<BlockPos, PreviewManager.BuildSnapshot> buildMap = PreviewManager.pendingCommit.get(playerId);
+            if (buildMap == null) continue;
+
+            if (buildMap.containsKey(spawnPos)) {
+                event.setCanceled(true);
+                return;
+            }
+            for (Direction dir : Direction.values()) {
+                if (buildMap.containsKey(spawnPos.relative(dir))) {
+                    event.setCanceled(true);
+                    return;
+                }
+            }
+        }
+    }
+
 
 
     private static boolean isRealPlayer(Player player) {
@@ -509,6 +536,17 @@ public class PreviewEvents {
                 event.setCanceled(true);
                 player.displayClientMessage(Component.literal("You cannot break the anchor block while in preview!"), true);
                 return;
+            }
+
+            // Prevent breaking block entities that contain items
+            if (event.getLevel().getBlockEntity(targetPos) instanceof net.minecraft.world.Container container) {
+                if (!container.isEmpty()) {
+                    event.setCanceled(true);
+                    if (!event.getLevel().isClientSide()) {
+                        player.displayClientMessage(Component.literal("§cEmpty the container before breaking it in Preview Mode!"), true);
+                    }
+                    return;
+                }
             }
 
             // --- NEW: Check Banned Blocks List ---
@@ -566,13 +604,59 @@ public class PreviewEvents {
                 return;
             }
 
+
             PreviewManager.recordChange(player.getUUID(), event.getPos(), event.getState());
 
-
-// Change it to:
             if (player instanceof ServerPlayer serverPlayer) {
+                recordDoubleBlockPartner(serverPlayer, pos, state, event.getLevel());
                 PreviewManager.recordAndSync(serverPlayer, event.getPos(), event.getState(), event.getPos());
             }
+        }
+    }
+
+    private static void recordDoubleBlockPartner(ServerPlayer player, BlockPos brokenPos, BlockState brokenState, net.minecraft.world.level.LevelAccessor level) {
+        BlockPos partnerPos = null;
+
+        // Beds: find the other half
+        if (brokenState.getBlock() instanceof net.minecraft.world.level.block.BedBlock) {
+            net.minecraft.world.level.block.state.properties.BedPart part =
+                    brokenState.getValue(net.minecraft.world.level.block.BedBlock.PART);
+            net.minecraft.core.Direction facing = brokenState.getValue(net.minecraft.world.level.block.BedBlock.FACING);
+            if (part == net.minecraft.world.level.block.state.properties.BedPart.FOOT) {
+                partnerPos = brokenPos.relative(facing); // head is in front
+            } else {
+                partnerPos = brokenPos.relative(facing.getOpposite()); // foot is behind
+            }
+        }
+        // Doors: find the other half
+        else if (brokenState.getBlock() instanceof net.minecraft.world.level.block.DoorBlock) {
+            net.minecraft.world.level.block.state.properties.DoubleBlockHalf half =
+                    brokenState.getValue(net.minecraft.world.level.block.DoorBlock.HALF);
+            if (half == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER) {
+                partnerPos = brokenPos.above();
+            } else {
+                partnerPos = brokenPos.below();
+            }
+        }
+        // Tall plants (sunflower, lilac, etc.)
+        else if (brokenState.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.DOUBLE_BLOCK_HALF)) {
+            net.minecraft.world.level.block.state.properties.DoubleBlockHalf half =
+                    brokenState.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.DOUBLE_BLOCK_HALF);
+            if (half == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER) {
+                partnerPos = brokenPos.above();
+            } else {
+                partnerPos = brokenPos.below();
+            }
+        }
+
+        if (partnerPos == null) return;
+
+        BlockState partnerState = level.getBlockState(partnerPos);
+
+        if (partnerState.getBlock() == brokenState.getBlock()) {
+            // Capture NOW while both halves are still in the world
+            PreviewManager.capturePendingPartner(player.getUUID(), partnerPos, partnerState);
+            PreviewManager.forceSessionEntry(player.getUUID(), partnerPos, partnerState);
         }
     }
 

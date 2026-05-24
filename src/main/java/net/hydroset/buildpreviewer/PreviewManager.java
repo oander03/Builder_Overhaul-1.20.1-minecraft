@@ -177,6 +177,29 @@ public class PreviewManager {
         return requirements;
     }
 
+    public static void recordSessionChange(UUID playerId, BlockPos pos, BlockState originalState) {
+        Map<BlockPos, BlockState> changes = sessionChanges.computeIfAbsent(playerId, k -> new HashMap<>());
+        // Only record if we haven't seen this pos yet — preserve the true original
+        if (!changes.containsKey(pos)) {
+            changes.put(pos, originalState);
+        }
+    }
+
+    // Add this field
+    private static final Map<UUID, Map<BlockPos, BlockState>> pendingPartnerStates = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static void capturePendingPartner(UUID playerId, BlockPos partnerPos, BlockState partnerState) {
+        pendingPartnerStates.computeIfAbsent(playerId, k -> new HashMap<>()).put(partnerPos, partnerState);
+    }
+
+    public static BlockState consumePendingPartner(UUID playerId, BlockPos pos) {
+        Map<BlockPos, BlockState> map = pendingPartnerStates.get(playerId);
+        if (map == null) return null;
+        return map.remove(pos);
+    }
+
+
+
     public static boolean isSecondaryHalf(BlockState state) {
         // Beds: skip the HEAD part (foot is placed first, head is secondary)
         if (state.getBlock() instanceof net.minecraft.world.level.block.BedBlock) {
@@ -369,10 +392,20 @@ public class PreviewManager {
             Map<BlockPos, BuildSnapshot> complexSnapshot = pendingCommit.computeIfAbsent(id, k -> new HashMap<>());
 
             changes.forEach((pos, original) -> {
-                // ← KEY FIX: treat pendingAir pos as AIR, not whatever's still in the world
-                BlockState current = pos.equals(pendingAir)
-                        ? Blocks.AIR.defaultBlockState()
-                        : player.level().getBlockState(pos);
+                BlockState captured = consumePendingPartner(id, pos);
+                BlockState current;
+                if (pos.equals(pendingAir)) {
+                    current = Blocks.AIR.defaultBlockState();
+                } else if (captured != null) {
+                    // Partner was broken alongside its twin — the world already removed it,
+                    // so the BUILD state (what we want to show was placed) is AIR.
+                    // The ORIGINAL state (what to restore to) is the captured pre-break state.
+                    // So we override the snapshot entirely:
+                    complexSnapshot.put(pos, new BuildSnapshot(captured, Blocks.AIR.defaultBlockState()));
+                    return; // skip the normal put below
+                } else {
+                    current = player.level().getBlockState(pos);
+                }
                 complexSnapshot.put(pos, new BuildSnapshot(original, current));
             });
 
@@ -385,6 +418,11 @@ public class PreviewManager {
                 be.updateBlock();
             }
         }
+    }
+
+    public static void forceSessionEntry(UUID playerId, BlockPos pos, BlockState originalState) {
+        sessionChanges.computeIfAbsent(playerId, k -> new HashMap<>())
+                .putIfAbsent(pos, originalState);
     }
 
 
@@ -471,6 +509,7 @@ public class PreviewManager {
         playerAnchorPos.remove(id);
         previousGameModes.remove(id);
         secondaryBlocks.remove(id);
+        pendingPartnerStates.remove(id);
 
         // Note: We keep pendingCommit so the 'shopping list' stays visible on the BE screen!
         player.displayClientMessage(Component.literal("§dExiting Build Mode"), true);
@@ -501,6 +540,7 @@ public class PreviewManager {
         lastSyncTime.remove(id);
         savedInventories.remove(id);
         playerAnchorPos.remove(id);
+        pendingPartnerStates.remove(id);
         // Intentionally keep: pendingCommit (shopping list), SavedData (anchor lookup)
     }
 
