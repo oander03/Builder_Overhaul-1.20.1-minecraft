@@ -249,10 +249,11 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
             player.sendSystemMessage(Component.literal("§cNot enough items to place any more blocks!"));
         }
 
+// Remove the old if (this.buildSnapshots.isEmpty()) block and just always close:
         if (this.buildSnapshots.isEmpty()) {
             this.requiredItems.clear();
-            player.closeContainer();
         }
+        player.closeContainer(); // Always close, regardless of remaining snapshots
 
         this.setChanged();
         level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
