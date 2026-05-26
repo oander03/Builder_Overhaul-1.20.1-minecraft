@@ -31,7 +31,8 @@ public class HologramSyncPacket {
     public HologramSyncPacket(Map<BlockPos, HologramEntry> entries) {
         this.entries = entries;
     }
-    
+
+
 
     // ── Codec helpers ────────────────────────────────────────────────────────
 

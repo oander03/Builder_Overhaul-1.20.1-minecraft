@@ -22,10 +22,10 @@ public class ModNetwork {
     public static void register() {
         CHANNEL.registerMessage(
                 id++,
-                net.hydroset.buildpreviewer.hologram.HologramSyncPacket.class,
-                net.hydroset.buildpreviewer.hologram.HologramSyncPacket::encode,
-                net.hydroset.buildpreviewer.hologram.HologramSyncPacket::decode,
-                net.hydroset.buildpreviewer.hologram.HologramSyncPacket::handle,
+                HologramSyncPacket.class,
+                HologramSyncPacket::encode,
+                HologramSyncPacket::decode,
+                HologramSyncPacket::handle,
                 java.util.Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
     }
