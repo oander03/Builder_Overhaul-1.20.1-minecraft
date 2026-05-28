@@ -53,6 +53,13 @@ public class ModMessages {
                 .encoder(RemoveRequiredItemPacket::encode)
                 .consumerMainThread(RemoveRequiredItemPacket::handle)
                 .add();
+
+        net.messageBuilder(ClearAllBlocksPacket.class, id(), NetworkDirection.PLAY_TO_SERVER)
+                .decoder(ClearAllBlocksPacket::new)
+                .encoder(ClearAllBlocksPacket::encode)
+                .consumerMainThread(ClearAllBlocksPacket::handle)
+                .add();
+
     }
 
     public static <MSG> void sendToServer(MSG message) {

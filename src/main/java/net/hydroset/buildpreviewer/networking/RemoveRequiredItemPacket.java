@@ -84,6 +84,8 @@ public class RemoveRequiredItemPacket {
                     newCost,
                     playerId
             );
+
+            PreviewManager.sendHologramUpdate(player);
             be.updateBlock();
         });
         ctx.get().setPacketHandled(true);

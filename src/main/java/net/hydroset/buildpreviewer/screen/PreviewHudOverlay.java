@@ -3,6 +3,7 @@ package net.hydroset.buildpreviewer.screen;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.hydroset.buildpreviewer.PreviewManager;
 import net.hydroset.buildpreviewer.block.entity.PreviewBlockEntity;
+import net.hydroset.buildpreviewer.hologram.HologramRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -31,10 +32,15 @@ public class PreviewHudOverlay {
     private static Map<Item, Integer> cachedIndexMap = new HashMap<>();
 
     // HUD button state
-    private static int hudBtnExitX, hudBtnExitY, hudBtnExitW = 90, hudBtnExitH = 14;
-    private static int hudBtnPlaceholderX, hudBtnPlaceholderY, hudBtnPlaceholderW = 90, hudBtnPlaceholderH = 14;
+    private static int hudBtnExitX, hudBtnExitY, hudBtnExitW = 94, hudBtnExitH = 20;
+    private static int hudBtnHologramX, hudBtnHologramY, hudBtnHologramW = 20, hudBtnHologramH = 20;
+    private static int hudBtnClearX, hudBtnClearY, hudBtnClearW = 20, hudBtnClearH = 20;
     private static boolean hudBtnExitHovered = false;
-    private static boolean hudBtnPlaceholderHovered = false;
+    private static boolean hudBtnHologramHovered = false;
+    private static boolean hudBtnClearHovered = false;
+
+    private static long clearBtnFirstClickTime = 0L;
+    private static final long CLEAR_CONFIRM_TIMEOUT_MS = 3000L; // resets after 3s
 
     private static void updateCache(Map<Item, Integer> requiredItems) {
         int hash = requiredItems.hashCode();
@@ -82,6 +88,12 @@ public class PreviewHudOverlay {
         dayTimeField = null;
         dayTimeFieldOwner = null;
         inventoryAlpha = 1.0f;
+        clearBtnFirstClickTime = 0L;
+    }
+
+    public static void onEnterPreview() {
+        resetCache();
+        HologramRenderer.setHologramsEnabled(false);
     }
 
 
@@ -121,7 +133,7 @@ public class PreviewHudOverlay {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
         if (!PreviewManager.isInPreview(mc.player.getUUID())) {
-            if (!cachedItemList.isEmpty()) resetCache();
+            if (!cachedItemList.isEmpty()) onEnterPreview();
             return;
         }
         if (!(event.getScreen() instanceof AbstractContainerScreen containerScreen)) return;
@@ -182,9 +194,21 @@ public class PreviewHudOverlay {
         hudBtnExitY = screenH - hudBtnExitH - margin;
         sliderX = screenW - sliderW - margin;
         sliderY = hudBtnExitY - sliderH - btnGap;
+        hudBtnHologramX = screenW - hudBtnHologramW - margin;
+        hudBtnHologramY = sliderY - hudBtnHologramH - btnGap;
+        hudBtnClearW = 20; hudBtnClearH = 20;
+        hudBtnClearX = hudBtnHologramX - hudBtnClearW - btnGap;
+        hudBtnClearY = hudBtnHologramY;
 
         hudBtnExitHovered = mouseX >= hudBtnExitX && mouseX < hudBtnExitX + hudBtnExitW
                 && mouseY >= hudBtnExitY && mouseY < hudBtnExitY + hudBtnExitH;
+
+        hudBtnHologramHovered = mouseX >= hudBtnHologramX && mouseX < hudBtnHologramX + hudBtnHologramW
+                && mouseY >= hudBtnHologramY && mouseY < hudBtnHologramY + hudBtnHologramH;
+
+
+        hudBtnClearHovered = mouseX >= hudBtnClearX && mouseX < hudBtnClearX + hudBtnClearW
+                && mouseY >= hudBtnClearY && mouseY < hudBtnClearY + hudBtnClearH;
 
         // Initialize slider from current world time if not yet set
         if (sliderValue < 0f && mc.level != null) {
@@ -193,6 +217,39 @@ public class PreviewHudOverlay {
 
         drawVanillaButton(guiGraphics, mc, hudBtnExitX, hudBtnExitY, hudBtnExitW, hudBtnExitH,
                 "⛏ Exit Builder", hudBtnExitHovered);
+
+// Replace the drawVanillaButton call for the hologram button:
+        boolean hologramsOn = HologramRenderer.isHologramsEnabled();
+        drawVanillaButton(guiGraphics, mc, hudBtnHologramX, hudBtnHologramY, hudBtnHologramW, hudBtnHologramH,
+                hologramsOn ? "◆" : "◇", hudBtnHologramHovered);
+
+        boolean clearPending = (System.currentTimeMillis() - clearBtnFirstClickTime) < CLEAR_CONFIRM_TIMEOUT_MS;
+        drawVanillaButton(guiGraphics, mc, hudBtnClearX, hudBtnClearY, hudBtnClearW, hudBtnClearH,
+                clearPending ? "§c✕" : "✕", hudBtnClearHovered);
+
+// Tooltips — rendered last so they always appear on top
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0, 0, 400.0f);
+        if (hudBtnExitHovered) {
+            guiGraphics.renderTooltip(mc.font,
+                    net.minecraft.network.chat.Component.literal("Exit builder mode"),
+                    mouseX, mouseY);
+        } else if (hudBtnHologramHovered) {
+            guiGraphics.renderTooltip(mc.font,
+                    net.minecraft.network.chat.Component.literal(hologramsOn ? "Hide holograms" : "Show holograms"),
+                    mouseX, mouseY);
+        } else if (hudBtnClearHovered) {
+            guiGraphics.renderTooltip(mc.font,
+                    net.minecraft.network.chat.Component.literal(clearPending ? "§cAre you sure?" : "Clear all changes"),
+                    mouseX, mouseY);
+        } else if (mouseX >= sliderX && mouseX < sliderX + sliderW
+        && mouseY >= sliderY && mouseY < sliderY + sliderH) {
+        guiGraphics.renderTooltip(mc.font,
+                net.minecraft.network.chat.Component.literal("Drag to change time of day"),
+                mouseX, mouseY);
+    }
+        guiGraphics.pose().popPose();
+
         drawTimeSlider(guiGraphics, mc, mouseX, mouseY);
     }
 
@@ -228,6 +285,19 @@ public class PreviewHudOverlay {
                 sliderValue = (float)(mouseX - sliderX) / sliderW;
                 sliderValue = Math.max(0f, Math.min(1f, sliderValue));
             }
+        }
+
+        // After drawing the slider track blits, before drawing the handle:
+        boolean sliderHovered = mouseX >= sliderX && mouseX < sliderX + sliderW
+                && mouseY >= sliderY && mouseY < sliderY + sliderH;
+
+        if (sliderHovered && !sliderDragging) {
+            RenderSystem.enableBlend();
+            guiGraphics.pose().pushPose();
+            guiGraphics.pose().translate(0, 0, 1.0f);
+            guiGraphics.fill(sliderX, sliderY, sliderX + sliderW, sliderY + sliderH, 0x33FFFFFF);
+            guiGraphics.pose().popPose();
+            RenderSystem.disableBlend();
         }
 
         // Draw slider track
@@ -353,7 +423,7 @@ public class PreviewHudOverlay {
 
         int v = hovered ? 86 : 66;
         int halfW = w / 2;
-        guiGraphics.blit(WIDGETS, x,         y, 0,                v, halfW,      h, 256, 256);
+        guiGraphics.blit(WIDGETS, x, y, 0, v, halfW, h, 256, 256);
         guiGraphics.blit(WIDGETS, x + halfW, y, 200 - (w - halfW), v, w - halfW, h, 256, 256);
 
         int textColor = hovered ? 0xFFFFA0 : 0xFFFFFF;
@@ -425,16 +495,6 @@ public class PreviewHudOverlay {
 
                 RenderSystem.disableBlend();
                 guiGraphics.pose().popPose();
-            } else if (remaining <= 0) {
-                countText = "✔";
-                textColor = 0x55FF55;
-            } else if (currentInSlot > 0) {
-                countText = String.valueOf(remaining);
-                float t = (float) currentInSlot / totalNeeded;
-                int r = (int)(0x52 + t * (0xC9 - 0x52));
-                int g = (int)(0x39 + t * (0xE9 - 0x39));
-                int b = (int)(0x37 + t * (0x1D - 0x37));
-                textColor = (0xFF << 24) | (r << 16) | (g << 8) | b;
             } else {
                 countText = String.valueOf(remaining);
                 textColor = 0xFF5555;
@@ -498,6 +558,33 @@ public class PreviewHudOverlay {
                 net.hydroset.buildpreviewer.networking.ModMessages.sendToServer(
                         new net.hydroset.buildpreviewer.networking.TogglePreviewPacket(anchor));
                 mc.player.closeContainer();
+            }
+            return;
+        }
+
+
+
+        if (mouseX >= hudBtnHologramX && mouseX < hudBtnHologramX + hudBtnHologramW
+                && mouseY >= hudBtnHologramY && mouseY < hudBtnHologramY + hudBtnHologramH) {
+            HologramRenderer.setHologramsEnabled(!HologramRenderer.isHologramsEnabled());
+            return;
+        }
+
+        if (mouseX >= hudBtnClearX && mouseX < hudBtnClearX + hudBtnClearW
+                && mouseY >= hudBtnClearY && mouseY < hudBtnClearY + hudBtnClearH) {
+            long now = System.currentTimeMillis();
+            if (now - clearBtnFirstClickTime < CLEAR_CONFIRM_TIMEOUT_MS) {
+                // Second click — confirmed
+                BlockPos anchor = PreviewManager.getAnchorPos(mc.player.getUUID());
+                if (anchor != null) {
+                    net.hydroset.buildpreviewer.networking.ModMessages.sendToServer(
+                            new net.hydroset.buildpreviewer.networking.ClearAllBlocksPacket(anchor));
+                }
+                clearBtnFirstClickTime = 0L;
+                resetCache();
+            } else {
+                // First click — arm the confirmation
+                clearBtnFirstClickTime = now;
             }
             return;
         }

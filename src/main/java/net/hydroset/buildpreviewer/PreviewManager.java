@@ -21,8 +21,7 @@ import net.minecraftforge.network.PacketDistributor;
 import javax.annotation.Nullable;
 import java.util.*;
 
-import static net.hydroset.buildpreviewer.screen.PreviewHudOverlay.resetCache;
-
+import static net.hydroset.buildpreviewer.screen.PreviewHudOverlay.onEnterPreview;
 
 public class PreviewManager {
 
@@ -526,8 +525,6 @@ public class PreviewManager {
 // ... but actually call it with an empty map explicitly:
         ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                 new HologramSyncPacket(new HashMap<>()));
-
-        resetCache();
 
         Map<BlockPos, BlockState> currentSession = sessionChanges.get(id);
         Map<BlockPos, BuildSnapshot> complexSnapshot = pendingCommit.computeIfAbsent(id, k -> new HashMap<>());

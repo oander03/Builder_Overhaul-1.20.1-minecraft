@@ -20,9 +20,17 @@ import java.util.*;
 @Mod.EventBusSubscriber(value = Dist.CLIENT, modid = net.hydroset.buildpreviewer.BuildPreviewer.MOD_ID)
 public class HologramRenderer {
 
-    private static final float PLACED_R = 0.35f, PLACED_G = 0.55f, PLACED_B = 1.00f, PLACED_A = 0.55f;
-    private static final float BROKEN_R = 1.00f, BROKEN_G = 0.20f, BROKEN_B = 0.20f, BROKEN_A = 0.55f;
-    private static final float SCALE = 1.003f;
+    private static final float PLACED_R = 0.75f, PLACED_G = 1.00f, PLACED_B = 1.00f, PLACED_A = 0.25f;
+    private static final float BROKEN_R = 1.00f, BROKEN_G = 0.50f, BROKEN_B = 0.50f, BROKEN_A = 0.25f;
+    private static final float SCALE_PLACED = 1.002f;
+    private static final float SCALE_BROKEN = 1.000f;
+
+    // Add this field near the top with the other statics
+    private static volatile boolean hologramsEnabled = false;
+
+    // Add getter/setter
+    public static boolean isHologramsEnabled() { return hologramsEnabled; }
+    public static void setHologramsEnabled(boolean enabled) { hologramsEnabled = enabled; }
 
     private static volatile Map<BlockPos, HologramSyncPacket.HologramEntry> holograms = Collections.emptyMap();
 
@@ -36,6 +44,10 @@ public class HologramRenderer {
 
     @SubscribeEvent
     public static void onRenderLevelStage(RenderLevelStageEvent event) {
+
+        // In onRenderLevelStage, add this check right after the snapshot.isEmpty() check:
+        if (!hologramsEnabled) return;
+
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) return;
 
         Map<BlockPos, HologramSyncPacket.HologramEntry> snapshot = holograms;
@@ -87,22 +99,16 @@ public class HologramRenderer {
             } else {
                 r = BROKEN_R; g = BROKEN_G; b = BROKEN_B; a = BROKEN_A;
             }
-
-            // ── Determine the 3 camera-visible faces in world space ───────────
-            // The camera can only see one face per axis. We pick based on which
-            // side of the block centre the camera sits on.
-
-
+            
 
             Set<Direction> allowedFaces = EnumSet.allOf(Direction.class);
-
-
-
 
             poseStack.pushPose();
             poseStack.translate(pos.getX() - camX, pos.getY() - camY, pos.getZ() - camZ);
             poseStack.translate(0.5, 0.5, 0.5);
-            poseStack.scale(SCALE, SCALE, SCALE);
+            // With this:
+            float scale = hologram.isPlaced() ? SCALE_PLACED : SCALE_BROKEN;
+            poseStack.scale(scale, scale, scale);
             poseStack.translate(-0.5, -0.5, -0.5);
 
             TintedBufferSource tinted = new TintedBufferSource(realSource, r, g, b, a, allowedFaces);
