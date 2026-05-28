@@ -277,6 +277,10 @@ public class PreviewHudOverlay {
         inventoryAlpha += (targetAlpha - inventoryAlpha) * 0.2f; // smooth lerp
         if (Math.abs(inventoryAlpha - targetAlpha) < 0.01f) inventoryAlpha = targetAlpha;
 
+        // After drawing the slider track blits, before drawing the handle:
+        boolean sliderHovered = mouseX >= sliderX && mouseX < sliderX + sliderW
+                && mouseY >= sliderY && mouseY < sliderY + sliderH;
+
         if (sliderDragging || (mouseDown
                 && mouseX >= sliderX && mouseX < sliderX + sliderW
                 && mouseY >= sliderY && mouseY < sliderY + sliderH)) {
@@ -287,29 +291,33 @@ public class PreviewHudOverlay {
             }
         }
 
-        // After drawing the slider track blits, before drawing the handle:
-        boolean sliderHovered = mouseX >= sliderX && mouseX < sliderX + sliderW
-                && mouseY >= sliderY && mouseY < sliderY + sliderH;
 
-        if (sliderHovered && !sliderDragging) {
-            RenderSystem.enableBlend();
-            guiGraphics.pose().pushPose();
-            guiGraphics.pose().translate(0, 0, 1.0f);
-            guiGraphics.fill(sliderX, sliderY, sliderX + sliderW, sliderY + sliderH, 0x33FFFFFF);
-            guiGraphics.pose().popPose();
-            RenderSystem.disableBlend();
-        }
 
-        // Draw slider track
-        int halfW = sliderW / 2;
-        guiGraphics.blit(WIDGETS, sliderX,         sliderY, 0,                      66, halfW,          sliderH, 256, 256);
-        guiGraphics.blit(WIDGETS, sliderX + halfW, sliderY, 200 - (sliderW - halfW), 66, sliderW - halfW, sliderH, 256, 256);
 
-        // Draw handle
+        // Replace the two track blits and two handle blits with this:
+        RenderSystem.enableBlend();
+
+// Track background
+
+        guiGraphics.fill(sliderX, sliderY, sliderX + sliderW, sliderY + sliderH, 0x33FFFFFF);
+
+// Filled portion left of handle
         int handleW = 8;
         int handleX = sliderX + (int)(sliderValue * (sliderW - handleW));
-        guiGraphics.blit(WIDGETS, handleX,              sliderY, 0,                 86, handleW / 2, sliderH, 256, 256);
-        guiGraphics.blit(WIDGETS, handleX + handleW / 2, sliderY, 200 - handleW / 2, 86, handleW / 2, sliderH, 256, 256);
+        guiGraphics.fill(sliderX, sliderY, handleX + handleW / 2, sliderY + sliderH,
+                sliderHovered || sliderDragging ? 0x33BBBBBB : 0x33AAAAAA);
+
+
+// Handle pip
+        guiGraphics.fill(handleX, sliderY, handleX + handleW, sliderY + sliderH, 0xFF292929);
+        RenderSystem.disableBlend();
+
+        // 1. Hover tint first (underneath everything)
+        if (sliderHovered && !sliderDragging) {
+            RenderSystem.enableBlend();
+            guiGraphics.fill(sliderX, sliderY, sliderX + sliderW, sliderY + sliderH, 0x40000000);
+            RenderSystem.disableBlend();
+        }
 
         // Label
         long ticks = (long)(sliderValue * 24000);
@@ -414,27 +422,22 @@ public class PreviewHudOverlay {
     private static void drawVanillaButton(GuiGraphics guiGraphics, Minecraft mc,
                                           int x, int y, int w, int h,
                                           String label, boolean hovered) {
-        RenderSystem.setShader(net.minecraft.client.renderer.GameRenderer::getPositionTexShader);
-        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
         RenderSystem.enableBlend();
 
-        net.minecraft.resources.ResourceLocation WIDGETS =
-                new net.minecraft.resources.ResourceLocation("textures/gui/widgets.png");
-
-        int v = hovered ? 86 : 66;
-        int halfW = w / 2;
-        guiGraphics.blit(WIDGETS, x, y, 0, v, halfW, h, 256, 256);
-        guiGraphics.blit(WIDGETS, x + halfW, y, 200 - (w - halfW), v, w - halfW, h, 256, 256);
-
-        int textColor = hovered ? 0xFFFFA0 : 0xFFFFFF;
+        guiGraphics.fill(x, y, x + w, y + h, 0x33FFFFFF);
+        RenderSystem.disableBlend();
+        RenderSystem.enableBlend();
+        if(hovered) {
+            guiGraphics.fill(x, y, x + w, y + h, 0x40000000);
+        }
+        RenderSystem.disableBlend();
+        int textColor = 0xFFFFFF;
         guiGraphics.pose().pushPose();
         guiGraphics.pose().translate(0, 0, 300.0f);
         int textX = x + (w - mc.font.width(label)) / 2;
         int textY = y + (h - mc.font.lineHeight) / 2 + 1;
-        guiGraphics.drawString(mc.font, label, textX, textY, textColor, true);
+        guiGraphics.drawString(mc.font, label, textX, textY, textColor, false);
         guiGraphics.pose().popPose();
-
-        RenderSystem.disableBlend();
     }
 
     private static void renderHud(GuiGraphics guiGraphics, Minecraft mc, PreviewBlockEntity previewBE, int mouseX, int mouseY) {
