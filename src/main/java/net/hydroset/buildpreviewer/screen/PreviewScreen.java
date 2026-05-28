@@ -237,8 +237,9 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
         if(remaining >= 100 && remaining < 1000) {
             scale = 0.75f;
-        }
-        else if(remaining >= 10000) {
+        } else if(remaining >= 100000) {
+            scale = 0.65f;
+        } else if(remaining >= 10000) {
             scale = 0.75f;
         }
 
