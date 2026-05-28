@@ -43,14 +43,12 @@ public class ScrollableSlot extends SlotItemHandler {
 
     @Override
     public int getMaxStackSize() {
-        // Tells the slot its absolute maximum capacity
-        return 1000;
+        return 999999;
     }
 
     @Override
     public int getMaxStackSize(@NotNull ItemStack stack) {
-        // This forces the UI to allow clicking/dragging more than 64/128 items
-        return 1000;
+        return 999999;
     }
 
     @Override

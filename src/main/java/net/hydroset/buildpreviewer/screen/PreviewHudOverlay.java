@@ -128,6 +128,35 @@ public class PreviewHudOverlay {
         applyClientTime(mc, newTime);
     }
 
+    private static void renderHudCount(GuiGraphics guiGraphics, Minecraft mc, int remaining, int x, int y) {
+        String text;
+        if (remaining >= 1000) {
+            text = (remaining / 1000) + "k";
+        } else {
+            text = String.valueOf(remaining);
+        }
+
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(x + 16, y + 16, 250.0f);
+
+        float scale = 1.0f;
+
+        if(remaining >= 100 && remaining < 1000) {
+            scale = 0.75f;
+        }
+        else if(remaining >= 10000) {
+            scale = 0.75f;
+        }
+
+        guiGraphics.pose().scale(scale, scale, 1.0f);
+
+        int textX = -mc.font.width(text);
+        int textY = -mc.font.lineHeight + 1;
+        guiGraphics.drawString(mc.font, text, textX, textY, 0xFF5555, true);
+
+        guiGraphics.pose().popPose();
+    }
+
     @SubscribeEvent
     public static void onScreenRender(net.minecraftforge.client.event.ScreenEvent.Render.Post event) {
         Minecraft mc = Minecraft.getInstance();
@@ -498,19 +527,12 @@ public class PreviewHudOverlay {
 
                 RenderSystem.disableBlend();
                 guiGraphics.pose().popPose();
-            } else {
-                countText = String.valueOf(remaining);
-                textColor = 0xFF5555;
             }
 
-            guiGraphics.pose().pushPose();
-            guiGraphics.pose().translate(0, 0, 200.0f);
-            if (!countText.isEmpty()) {
-                int textX = iconX + 17 - mc.font.width(countText);
-                int textY = iconY + 9;
-                guiGraphics.drawString(mc.font, countText, textX, textY, textColor, true);
+
+            if (!hovered && remaining > 0) {
+                renderHudCount(guiGraphics, mc, remaining, iconX, iconY);
             }
-            guiGraphics.pose().popPose();
         }
     }
 

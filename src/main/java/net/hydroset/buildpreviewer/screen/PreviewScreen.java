@@ -222,6 +222,35 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     // Animated fill progress per slot (smoothly lerps toward real value)
     private float[] animatedFill = new float[27];
 
+    private void renderSlotCount(GuiGraphics guiGraphics, int remaining, int x, int y) {
+        String text;
+        if (remaining >= 1000) {
+            text = (remaining / 1000) + "k";
+        } else {
+            text = String.valueOf(remaining);
+        }
+
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(x + 16, y + 16, 250.0f);
+
+        float scale = 1.0f;
+
+        if(remaining >= 100 && remaining < 1000) {
+            scale = 0.75f;
+        }
+        else if(remaining >= 10000) {
+            scale = 0.75f;
+        }
+
+        guiGraphics.pose().scale(scale, scale, 1.0f);
+
+        int textX = (int)(-this.font.width(text) * 1.0f);
+        int textY = (int)(-this.font.lineHeight * 1.0f) + 1;
+        guiGraphics.drawString(this.font, text, textX, textY, 0xFF5555, true);
+
+        guiGraphics.pose().popPose();
+    }
+
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float delta) {
         // 1. Draw the dark background tint
@@ -443,13 +472,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
                 RenderSystem.enableBlend();
 
                 // --- DRAW TEXT ---
-                String text = String.valueOf(remaining);
-                guiGraphics.pose().pushPose();
-                guiGraphics.pose().translate(0, 0, 250.0f);
-                int textX = x + 17 - this.font.width(text);
-                int textY = y + 9;
-                guiGraphics.drawString(this.font, text, textX, textY, 0xFF5555, true);
-                guiGraphics.pose().popPose();
+                renderSlotCount(guiGraphics, remaining, x, y);
 
                 RenderSystem.enableBlend();
 

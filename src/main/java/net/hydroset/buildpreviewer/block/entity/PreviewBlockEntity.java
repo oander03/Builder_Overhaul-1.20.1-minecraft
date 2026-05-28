@@ -66,15 +66,12 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
         @Override
         public int getSlotLimit(int slot) {
-            return 1000;
+            return 999999;
         }
-
-
 
         @Override
         protected int getStackLimit(int slot, @NotNull ItemStack stack) {
-            // This allows the internal storage to actually hold the high numbers
-            return 1000;
+            return 999999;
         }
 
     };

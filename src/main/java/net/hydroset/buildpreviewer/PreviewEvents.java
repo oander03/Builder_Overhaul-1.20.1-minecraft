@@ -75,7 +75,14 @@ public class PreviewEvents {
             Items.LIGHT,
             Items.DRAGON_EGG,
             Items.REINFORCED_DEEPSLATE,
-            Items.TURTLE_EGG
+            Items.TURTLE_EGG,
+            Items.SPRUCE_SAPLING,
+            Items.ACACIA_SAPLING,
+            Items.BIRCH_SAPLING,
+            Items.CHERRY_SAPLING,
+            Items.OAK_SAPLING,
+            Items.DARK_OAK_SAPLING,
+            Items.JUNGLE_SAPLING
     );
 
     private static final Set<net.minecraft.world.level.block.Block> BANNED_BLOCKS_TO_BREAK = Set.of(
