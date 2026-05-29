@@ -84,8 +84,19 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     private static final ResourceLocation SLOT_TEXTURE =
             new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/single_slot_gui.png");
 
+    private static final ResourceLocation TEXTURE_ACTIVE =
+            new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/preview_block_gui_active.png");
+
+    private static final ResourceLocation TEXTURE_SCROLL_ACTIVE =
+            new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/preview_block_gui_scroll_active.png");
+
     /** The visible texture width (your PNG). imageWidth is wider to allow scrollbar overflow. */
     private static final int TEXTURE_RENDER_WIDTH = 184;
+
+    private long clearBtnFirstClickTime = 0L;
+    private static final long CLEAR_CONFIRM_TIMEOUT_MS = 3000L;
+    private Button hologramButton;
+    private Button clearButton;
 
 
     @Override
@@ -156,7 +167,11 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         int totalRows = (int) Math.ceil(totalItems / 9.0);
         boolean needsScroll = totalRows > 3;
 
-        ResourceLocation activeTex = needsScroll ? TEXTURE_SCROLL : TEXTURE;
+// With this:
+        boolean inPreview = net.hydroset.buildpreviewer.PreviewManager.isInPreview(this.minecraft.player.getUUID());
+        ResourceLocation activeTex = inPreview
+                ? (needsScroll ? TEXTURE_SCROLL_ACTIVE : TEXTURE_ACTIVE)
+                : (needsScroll ? TEXTURE_SCROLL : TEXTURE);
         guiGraphics.blit(activeTex, x, y, 0, 0, TEXTURE_RENDER_WIDTH, imageHeight);
         int maxScroll = needsScroll ? totalRows - 3 : 0;
 
@@ -195,28 +210,36 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
     @Override
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        boolean inPreview = net.hydroset.buildpreviewer.PreviewManager.isInPreview(this.minecraft.player.getUUID());
 
-// Manual shadow (drawn 1px right and 1px down in dark color first)
-        guiGraphics.drawString(this.font, "Blueprint Builder", 24, 11, 0x111111, false);
-// Then the real text on top
-        guiGraphics.drawString(this.font, "Blueprint Builder", 23, 10, 0xccb1bd, false);
+        // "Blueprint Builder" title — green in preview, pink normally
+        if (inPreview) {
+            guiGraphics.drawString(this.font, "Blueprint Builder", 24, 11, 0x2b3311, false);
+            guiGraphics.drawString(this.font, "Blueprint Builder", 23, 10, 0xc7e59d, false);
+        } else {
+            guiGraphics.drawString(this.font, "Blueprint Builder", 24, 11, 0x111111, false);
+            guiGraphics.drawString(this.font, "Blueprint Builder", 23, 10, 0xccb1bd, false);
+        }
 
+        // "Committing" / "Constructing" label — green in preview, dark pink normally
         guiGraphics.pose().pushPose();
         guiGraphics.pose().scale(0.8f, 0.8f, 1.0f);
-        guiGraphics.drawString(this.font, "Committing", (int)(125/0.8), (int)(11/0.8), 0x63333c, false);
+        if (inPreview) {
+            guiGraphics.drawString(this.font, "Building", (int)(129/0.8), (int)(11/0.8), 0x659f00, false);
+        } else {
+            guiGraphics.drawString(this.font, "Committing", (int)(125/0.8), (int)(11/0.8), 0x63333c, false);
+        }
         guiGraphics.pose().popPose();
 
         guiGraphics.pose().pushPose();
         guiGraphics.pose().scale(0.9f, 0.9f, 1.0f);
         guiGraphics.drawString(this.font, this.title, (int)(8/0.9), (int)(30/0.9), 0x404040, false);
         guiGraphics.pose().popPose();
-// "REQUIRED ITEMS" label — adjust these two numbers
 
         guiGraphics.pose().pushPose();
         guiGraphics.pose().scale(0.9f, 0.9f, 1.0f);
         guiGraphics.drawString(this.font, this.playerInventoryTitle, (int)(8/0.9), (int)(97/0.9), 0x404040, false);
         guiGraphics.pose().popPose();
-        // "Inventory" label — adjust these two numbers
     }
 
     // Animated fill progress per slot (smoothly lerps toward real value)
@@ -630,6 +653,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             }
         }
 
+
         renderTooltip(guiGraphics, mouseX, mouseY);
     }
 
@@ -684,6 +708,37 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
                         : Tooltip.create(Component.literal("Go into a creative builder mode to build a blueprint.")))
                 .build();
         this.addRenderableWidget(this.toggleButton);
+
+        // Mini buttons — placed to the left of the finalize button
+        this.hologramButton = Button.builder(
+                        Component.literal(net.hydroset.buildpreviewer.hologram.HologramRenderer.isHologramsEnabled() ? "◆" : "◇"),
+                        (button) -> {
+                            net.hydroset.buildpreviewer.hologram.HologramRenderer.setHologramsEnabled(
+                                    !net.hydroset.buildpreviewer.hologram.HologramRenderer.isHologramsEnabled());
+                        })
+                .bounds(startX - 20 - 3 - 10, buttonY, 20, 20)
+                .tooltip(Tooltip.create(Component.literal("Toggle holograms")))
+                .build();
+        this.addRenderableWidget(this.hologramButton);
+
+        this.clearButton = Button.builder(
+                        Component.literal("✕"),
+                        (button) -> {
+                            long now = System.currentTimeMillis();
+                            if (now - clearBtnFirstClickTime < CLEAR_CONFIRM_TIMEOUT_MS) {
+                                net.hydroset.buildpreviewer.networking.ModMessages.sendToServer(
+                                        new net.hydroset.buildpreviewer.networking.ClearAllBlocksPacket(pos));
+                                clearBtnFirstClickTime = 0L;
+                                button.setMessage(Component.literal("✕"));
+                            } else {
+                                clearBtnFirstClickTime = now;
+                                button.setMessage(Component.literal("§c✕"));
+                            }
+                        })
+                .bounds(startX - 20 - 3 - 20 - 10 - 3, buttonY, 20, 20)
+                .tooltip(Tooltip.create(Component.literal("Clear all changes")))
+                .build();
+        this.addRenderableWidget(this.clearButton);
     }
 
     @Override
@@ -700,6 +755,25 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
                 ? Tooltip.create(Component.literal("Exit and return world back to normal."))
                 : Tooltip.create(Component.literal("Go into a creative builder mode to build a blueprint."))
         );
+
+        // Sync hologram button label
+        if (this.hologramButton != null) {
+            boolean hologramsOn = net.hydroset.buildpreviewer.hologram.HologramRenderer.isHologramsEnabled();
+            this.hologramButton.setMessage(Component.literal(hologramsOn ? "◆" : "◇"));
+            this.hologramButton.setTooltip(Tooltip.create(
+                    Component.literal(hologramsOn ? "Hide holograms" : "Show holograms")));
+        }
+
+// Reset clear button label if confirmation timed out
+        if (this.clearButton != null) {
+            boolean clearPending = (System.currentTimeMillis() - clearBtnFirstClickTime) < CLEAR_CONFIRM_TIMEOUT_MS;
+            if (!clearPending) {
+                this.clearButton.setMessage(Component.literal("✕"));
+                this.clearButton.setTooltip(Tooltip.create(Component.literal("Clear all changes")));
+            } else {
+                this.clearButton.setTooltip(Tooltip.create(Component.literal("§cAre you sure?")));
+            }
+        }
 
         // Disable finalize if in preview, or if there's nothing to finalize
         Map<Item, Integer> required = this.menu.getBlockEntity().getRequiredItems();

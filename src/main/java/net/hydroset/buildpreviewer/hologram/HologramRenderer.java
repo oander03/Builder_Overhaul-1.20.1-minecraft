@@ -22,7 +22,7 @@ public class HologramRenderer {
 
     private static final float PLACED_R = 0.75f, PLACED_G = 1.00f, PLACED_B = 1.00f, PLACED_A = 0.25f;
     private static final float BROKEN_R = 1.00f, BROKEN_G = 0.50f, BROKEN_B = 0.50f, BROKEN_A = 0.25f;
-    private static final float SCALE_PLACED = 1.002f;
+    private static final float SCALE_PLACED = 1.000f;
     private static final float SCALE_BROKEN = 1.000f;
 
     // Add this field near the top with the other statics

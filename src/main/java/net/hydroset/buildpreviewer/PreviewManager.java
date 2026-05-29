@@ -21,8 +21,6 @@ import net.minecraftforge.network.PacketDistributor;
 import javax.annotation.Nullable;
 import java.util.*;
 
-import static net.hydroset.buildpreviewer.screen.PreviewHudOverlay.onEnterPreview;
-
 public class PreviewManager {
 
     private static final Map<UUID, ListTag> savedInventories = new HashMap<>();
@@ -521,10 +519,8 @@ public class PreviewManager {
         BlockPos anchor = playerAnchorPos.get(id);
         lastSyncTime.remove(id);
         // 3. Top of exitPreview() — BEFORE the rollback loop (to clear ghosts):
-        sendHologramUpdate(player);   // sends empty map since pendingCommit is about to clear
-// ... but actually call it with an empty map explicitly:
-        ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                new HologramSyncPacket(new HashMap<>()));
+        sendHologramUpdate(player);
+
 
         Map<BlockPos, BlockState> currentSession = sessionChanges.get(id);
         Map<BlockPos, BuildSnapshot> complexSnapshot = pendingCommit.computeIfAbsent(id, k -> new HashMap<>());

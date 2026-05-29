@@ -91,12 +91,6 @@ public class PreviewHudOverlay {
         clearBtnFirstClickTime = 0L;
     }
 
-    public static void onEnterPreview() {
-        resetCache();
-        HologramRenderer.setHologramsEnabled(false);
-    }
-
-
     @SubscribeEvent
     public static void onPacketReceived(net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingIn event) {
         // reset on login
@@ -163,7 +157,7 @@ public class PreviewHudOverlay {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
         if (!PreviewManager.isInPreview(mc.player.getUUID())) {
-            if (!cachedItemList.isEmpty()) onEnterPreview();
+            if (!cachedItemList.isEmpty()) resetCache();
             return;
         }
         if (!(event.getScreen() instanceof AbstractContainerScreen containerScreen)) return;
@@ -260,11 +254,7 @@ public class PreviewHudOverlay {
 // Tooltips — rendered last so they always appear on top
         guiGraphics.pose().pushPose();
         guiGraphics.pose().translate(0, 0, 400.0f);
-        if (hudBtnExitHovered) {
-            guiGraphics.renderTooltip(mc.font,
-                    net.minecraft.network.chat.Component.literal("Exit builder mode"),
-                    mouseX, mouseY);
-        } else if (hudBtnHologramHovered) {
+        if (hudBtnHologramHovered) {
             guiGraphics.renderTooltip(mc.font,
                     net.minecraft.network.chat.Component.literal(hologramsOn ? "Hide holograms" : "Show holograms"),
                     mouseX, mouseY);
@@ -273,11 +263,11 @@ public class PreviewHudOverlay {
                     net.minecraft.network.chat.Component.literal(clearPending ? "§cAre you sure?" : "Clear all changes"),
                     mouseX, mouseY);
         } else if (mouseX >= sliderX && mouseX < sliderX + sliderW
-        && mouseY >= sliderY && mouseY < sliderY + sliderH) {
+        && mouseY >= sliderY && mouseY < sliderY + sliderH && !sliderDragging) {
         guiGraphics.renderTooltip(mc.font,
                 net.minecraft.network.chat.Component.literal("Drag to change time of day"),
                 mouseX, mouseY);
-    }
+        }
         guiGraphics.pose().popPose();
 
         drawTimeSlider(guiGraphics, mc, mouseX, mouseY);
