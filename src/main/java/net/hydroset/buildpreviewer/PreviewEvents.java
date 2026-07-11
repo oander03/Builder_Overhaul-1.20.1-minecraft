@@ -430,7 +430,13 @@ public class PreviewEvents {
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onBeforePlace(PlayerInteractEvent.RightClickBlock event) {
         UUID uuid = event.getEntity().getUUID();
-        // ✅ Capture state for ALL players, not just preview players
+
+        // Right-clicking a block just to open its GUI (e.g. our anchor) is not a
+        // placement attempt and must not be recorded as a pending state change.
+        if (!(event.getItemStack().getItem() instanceof BlockItem)) {
+            return;
+        }
+
         BlockPos targetPos = event.getPos().relative(event.getFace());
         BlockState currentState = event.getLevel().getBlockState(targetPos);
         pendingPlacementState.put(uuid, currentState);

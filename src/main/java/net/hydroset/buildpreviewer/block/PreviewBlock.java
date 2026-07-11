@@ -109,8 +109,6 @@ public class PreviewBlock extends Block implements EntityBlock {
                 // This ensures the block is placed firmly and the neighbors are notified correctly
                 level.setBlock(pos, snapshot.buildState, 3);
             });
-
-            player.displayClientMessage(Component.literal("§aBuild finalized!"), false);
         }
     }
 

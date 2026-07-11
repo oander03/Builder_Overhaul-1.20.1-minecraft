@@ -691,7 +691,8 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
                 .build();
         Map<net.minecraft.world.item.Item, Integer> required = this.menu.getBlockEntity().getRequiredItems();
         boolean hasContent = required != null && !required.isEmpty();
-        this.finalizeButton.active = !net.hydroset.buildpreviewer.PreviewManager.isInPreview(this.minecraft.player.getUUID()) && hasContent;
+        this.finalizeButton.active = !net.hydroset.buildpreviewer.PreviewManager.isInPreview(this.minecraft.player.getUUID())
+                && this.menu.getBlockEntity().hasPendingChanges();
         this.addRenderableWidget(this.finalizeButton);
 
 // 2. Toggle Button
@@ -778,6 +779,5 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         // Disable finalize if in preview, or if there's nothing to finalize
         Map<Item, Integer> required = this.menu.getBlockEntity().getRequiredItems();
         boolean hasContent = required != null && !required.isEmpty();
-        this.finalizeButton.active = !inPreview && hasContent;
-    }
+        this.finalizeButton.active = !inPreview && this.menu.getBlockEntity().hasPendingChanges();    }
 }

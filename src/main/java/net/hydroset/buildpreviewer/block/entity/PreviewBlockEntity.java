@@ -76,6 +76,12 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
     };
 
+    private int pendingChangeCount = 0;
+
+    public boolean hasPendingChanges() {
+        return pendingChangeCount > 0;
+    }
+
 
     public PreviewBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.PREVIEW_BE.get(), pos, state);
@@ -193,7 +199,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     }
     // Inside PreviewBlockEntity.java
 
-    public void checkRequirementsAndCommit(ServerPlayer player) {
+    public void checkRequirementsAndCommit (ServerPlayer player){
         if (this.buildSnapshots.isEmpty()) {
             player.sendSystemMessage(Component.literal("§cNo active build to finalize!"));
             return;
@@ -202,6 +208,9 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         Map<BlockPos, PreviewManager.BuildSnapshot> blocksToPlace = new HashMap<>();
         Map<BlockPos, PreviewManager.BuildSnapshot> remainingSnapshots = new HashMap<>(this.buildSnapshots);
 
+        int placedCount = 0;
+        int brokenCount = 0;
+
         for (Map.Entry<BlockPos, PreviewManager.BuildSnapshot> entry : this.buildSnapshots.entrySet()) {
             BlockPos pos = entry.getKey();
             PreviewManager.BuildSnapshot snapshot = entry.getValue();
@@ -209,8 +218,14 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
 
             // Free removals
             if (plannedState.isAir()) {
+                if (plannedState.equals(snapshot.originalState)) {
+                    // No actual change happened here (phantom/no-op entry) — discard silently.
+                    remainingSnapshots.remove(pos);
+                    continue;
+                }
                 blocksToPlace.put(pos, snapshot);
                 remainingSnapshots.remove(pos);
+                brokenCount++;
                 continue;
             }
 
@@ -222,6 +237,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
             if (itemNeeded != Items.AIR && hasAndConsumeSingleItem(itemNeeded)) {
                 blocksToPlace.put(pos, snapshot);
                 remainingSnapshots.remove(pos);
+                placedCount++;
 
                 // Find and add the secondary half automatically (no item cost)
                 for (BlockPos neighbor : new BlockPos[]{
@@ -232,6 +248,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
                             && neighborSnapshot.buildState.getBlock() == plannedState.getBlock()) {
                         blocksToPlace.put(neighbor, neighborSnapshot);
                         remainingSnapshots.remove(neighbor);
+                        placedCount++;
                         break;
                     }
                 }
@@ -241,22 +258,22 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         if (!blocksToPlace.isEmpty()) {
             PreviewBlock.commitBuild(player, blocksToPlace);
             this.buildSnapshots = remainingSnapshots;
+            this.pendingChangeCount = this.buildSnapshots.size();
             this.requiredItems = PreviewManager.calculateRequiredItemsFromMap(this.buildSnapshots);
 
-            // Keep PreviewManager's pendingCommit in sync with what we just placed,
-            // and push a fresh hologram packet so blocks that were just placed
-            // (and are no longer in buildSnapshots) stop showing their ghost.
             PreviewManager.pendingCommit.put(player.getUUID(), this.buildSnapshots);
             PreviewManager.sendHologramUpdate(player);
+
+            player.sendSystemMessage(Component.literal(
+                    "§aFinalized: §f" + placedCount + " placed§7, §f" + brokenCount + " broken"));
         } else {
             player.sendSystemMessage(Component.literal("§cNot enough items to place any more blocks!"));
         }
 
-// Remove the old if (this.buildSnapshots.isEmpty()) block and just always close:
         if (this.buildSnapshots.isEmpty()) {
             this.requiredItems.clear();
         }
-        player.closeContainer(); // Always close, regardless of remaining snapshots
+        player.closeContainer();
 
         this.setChanged();
         level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
@@ -308,9 +325,10 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     }
 
     public void setBuildData(Map<BlockPos, PreviewManager.BuildSnapshot> snapshots, Map<Item, Integer> cost, UUID owner) {
-        this.buildSnapshots = new HashMap<>(snapshots); // Removed the extra underscores
+        this.buildSnapshots = new HashMap<>(snapshots);
         this.requiredItems = new HashMap<>(cost);
         this.ownerUUID = owner;
+        this.pendingChangeCount = this.buildSnapshots.size();
         this.setChanged();
     }
 
@@ -375,15 +393,15 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         return gm;
     }
 
-    // Lightweight client sync — skip build snapshots entirely
     @Override
     public @NotNull CompoundTag getUpdateTag() {
         CompoundTag nbt = new CompoundTag();
         saveInventory(nbt);
         saveRequiredItems(nbt);
+        nbt.putInt("PendingChangeCount", pendingChangeCount);
         if (ownerUUID != null) nbt.putUUID("Owner", ownerUUID);
         if (savedPlayerInventory != null) {
-            nbt.put("SavedPlayerInventory", savedPlayerInventory); // ✅ add this
+            nbt.put("SavedPlayerInventory", savedPlayerInventory);
         }
         return nbt;
     }
@@ -443,6 +461,9 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
                 BlockState build = NbtUtils.readBlockState(lookup, entryTag.getCompound("build"));
                 this.buildSnapshots.put(pos, new PreviewManager.BuildSnapshot(original, build));
             }
+            this.pendingChangeCount = this.buildSnapshots.size();
+        } else if (tag.contains("PendingChangeCount")) {
+            this.pendingChangeCount = tag.getInt("PendingChangeCount");
         }
 
         if (tag.contains("RequiredItems")) {
