@@ -481,12 +481,8 @@ public class PreviewManager {
                 if (pos.equals(pendingAir)) {
                     current = Blocks.AIR.defaultBlockState();
                 } else if (captured != null) {
-                    // Partner was broken alongside its twin — the world already removed it,
-                    // so the BUILD state (what we want to show was placed) is AIR.
-                    // The ORIGINAL state (what to restore to) is the captured pre-break state.
-                    // So we override the snapshot entirely:
                     complexSnapshot.put(pos, new BuildSnapshot(captured, Blocks.AIR.defaultBlockState()));
-                    return; // skip the normal put below
+                    return;
                 } else {
                     current = player.level().getBlockState(pos);
                 }
@@ -495,16 +491,12 @@ public class PreviewManager {
 
             Map<Item, Integer> liveCost = calculateRequiredItems(player, pendingAir);
             be.setRequiredItems(liveCost, id);
-
-            long now = System.currentTimeMillis();
-            if (now - lastSyncTime.getOrDefault(id, 0L) >= SYNC_INTERVAL_MS) {
-                lastSyncTime.put(id, now);
-                be.updateBlock();
-            }
+            // NOTE: no be.updateBlock() here anymore — this only updates server-side
+            // bookkeeping (and setChanged() for disk-save safety). No packet is sent.
+            // The client will explicitly ask for a fresh sync when it opens the inventory.
         }
 
-        sendHologramUpdate(player);
-
+        sendHologramUpdate(player); // unchanged — holograms still need to be live in the world
     }
 
     public static void forceSessionEntry(UUID playerId, BlockPos pos, BlockState originalState) {

@@ -60,6 +60,12 @@ public class ModMessages {
                 .consumerMainThread(ClearAllBlocksPacket::handle)
                 .add();
 
+        net.messageBuilder(RequestBuildSyncPacket.class, id(), NetworkDirection.PLAY_TO_SERVER)
+                .decoder(RequestBuildSyncPacket::new)
+                .encoder(RequestBuildSyncPacket::toBytes)
+                .consumerMainThread(RequestBuildSyncPacket::handle)
+                .add();
+
     }
 
     public static <MSG> void sendToServer(MSG message) {

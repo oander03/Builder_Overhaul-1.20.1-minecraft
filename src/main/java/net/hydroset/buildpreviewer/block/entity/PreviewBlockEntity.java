@@ -77,9 +77,47 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
     };
 
     private int pendingChangeCount = 0;
+    private int pendingPlacedCount = 0;
+    private int pendingBrokenCount = 0;
 
     public boolean hasPendingChanges() {
         return pendingChangeCount > 0;
+    }
+
+    public int getPendingPlacedCount() {
+        return pendingPlacedCount;
+    }
+
+    public int getPendingBrokenCount() {
+        return pendingBrokenCount;
+    }
+
+    private void recalculatePendingCounts() {
+        int placed = 0;
+        int broken = 0;
+
+        for (PreviewManager.BuildSnapshot snapshot : buildSnapshots.values()) {
+            BlockState planned = snapshot.buildState;
+
+            if (planned.isAir()) {
+                // Only count as "broken" if something actually changed
+                // (guards against the same phantom no-op case fixed earlier)
+                if (!planned.equals(snapshot.originalState)) {
+                    broken++;
+                }
+                continue;
+            }
+
+            // Skip secondary halves — they ride along for free, don't double count
+            if (PreviewManager.isSecondaryHalf(planned)) continue;
+
+            if (!planned.equals(snapshot.originalState)) {
+                placed++;
+            }
+        }
+
+        this.pendingPlacedCount = placed;
+        this.pendingBrokenCount = broken;
     }
 
 
@@ -259,6 +297,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
             PreviewBlock.commitBuild(player, blocksToPlace);
             this.buildSnapshots = remainingSnapshots;
             this.pendingChangeCount = this.buildSnapshots.size();
+            recalculatePendingCounts();
             this.requiredItems = PreviewManager.calculateRequiredItemsFromMap(this.buildSnapshots);
 
             PreviewManager.pendingCommit.put(player.getUUID(), this.buildSnapshots);
@@ -329,6 +368,7 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         this.requiredItems = new HashMap<>(cost);
         this.ownerUUID = owner;
         this.pendingChangeCount = this.buildSnapshots.size();
+        recalculatePendingCounts();
         this.setChanged();
     }
 
@@ -399,6 +439,8 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
         saveInventory(nbt);
         saveRequiredItems(nbt);
         nbt.putInt("PendingChangeCount", pendingChangeCount);
+        nbt.putInt("PendingPlacedCount", pendingPlacedCount);
+        nbt.putInt("PendingBrokenCount", pendingBrokenCount);
         if (ownerUUID != null) nbt.putUUID("Owner", ownerUUID);
         if (savedPlayerInventory != null) {
             nbt.put("SavedPlayerInventory", savedPlayerInventory);
@@ -462,8 +504,11 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
                 this.buildSnapshots.put(pos, new PreviewManager.BuildSnapshot(original, build));
             }
             this.pendingChangeCount = this.buildSnapshots.size();
+            recalculatePendingCounts();
         } else if (tag.contains("PendingChangeCount")) {
             this.pendingChangeCount = tag.getInt("PendingChangeCount");
+            this.pendingPlacedCount = tag.getInt("PendingPlacedCount");
+            this.pendingBrokenCount = tag.getInt("PendingBrokenCount");
         }
 
         if (tag.contains("RequiredItems")) {

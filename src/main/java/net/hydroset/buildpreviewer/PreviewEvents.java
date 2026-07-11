@@ -1,6 +1,8 @@
 package net.hydroset.buildpreviewer;
 
 import net.hydroset.buildpreviewer.block.entity.PreviewBlockEntity;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -455,6 +457,16 @@ public class PreviewEvents {
                 });
             }
         }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onScreenOpened(net.minecraftforge.client.event.ScreenEvent.Init.Post event) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
+        if (!PreviewManager.isInPreview(mc.player.getUUID())) return;
+
+        net.hydroset.buildpreviewer.networking.ModMessages.sendToServer(
+                new net.hydroset.buildpreviewer.networking.RequestBuildSyncPacket());
     }
 
     @SubscribeEvent

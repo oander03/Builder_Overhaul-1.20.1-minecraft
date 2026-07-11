@@ -42,6 +42,35 @@ public class PreviewHudOverlay {
     private static long clearBtnFirstClickTime = 0L;
     private static final long CLEAR_CONFIRM_TIMEOUT_MS = 3000L; // resets after 3s
 
+    // ---- Count-up animation support ----
+    private static final long COUNT_ANIM_DURATION_MS = 450L;
+
+    private static class CountAnim {
+        float displayed = 0f;
+        float animStart = 0f;
+        int target = Integer.MIN_VALUE; // sentinel forces first detection to trigger an anim leg
+        long startTime = 0L;
+    }
+
+    // Per-item "remaining" counter animations, keyed by item (for the left-side overlay icons)
+    private static final Map<Item, CountAnim> remainingAnims = new HashMap<>();
+
+    // Placed/Broken change-counter animation
+    private static float displayedPlaced = 0f;
+    private static float displayedBroken = 0f;
+    private static float animStartPlaced = 0f;
+    private static float animStartBroken = 0f;
+    private static int animTargetPlaced = Integer.MIN_VALUE;
+    private static int animTargetBroken = Integer.MIN_VALUE;
+    private static long animStartTimePB = 0L;
+
+    private static float easeOutCubic(float t) {
+        t = Math.max(0f, Math.min(1f, t));
+        float f = t - 1f;
+        return f * f * f + 1f;
+    }
+    // ---- end animation support ----
+
     private static void updateCache(Map<Item, Integer> requiredItems) {
         int hash = requiredItems.hashCode();
         if (hash == lastRequirementsHash) return;
@@ -54,6 +83,9 @@ public class PreviewHudOverlay {
             cachedStacks[i] = new ItemStack(cachedItemList.get(i).getKey());
             cachedIndexMap.put(cachedItemList.get(i).getKey(), i);
         }
+
+        // Prune animation state for items no longer in the list so the map doesn't grow forever
+        remainingAnims.keySet().removeIf(item -> !cachedIndexMap.containsKey(item));
     }
 
     private static void updateCountCache(PreviewBlockEntity previewBE) {
@@ -89,6 +121,35 @@ public class PreviewHudOverlay {
         dayTimeFieldOwner = null;
         inventoryAlpha = 1.0f;
         clearBtnFirstClickTime = 0L;
+
+        // Reset animation state too
+        remainingAnims.clear();
+        displayedPlaced = 0f;
+        displayedBroken = 0f;
+        animStartPlaced = 0f;
+        animStartBroken = 0f;
+        animTargetPlaced = Integer.MIN_VALUE;
+        animTargetBroken = Integer.MIN_VALUE;
+        animStartTimePB = 0L;
+    }
+
+    private static String formatCount(int value) {
+        if (value >= 1000) {
+            return (value / 1000) + "k";
+        }
+        return String.valueOf(value);
+    }
+
+    private static float scaleForCount(int value) {
+        float scale = 1.0f;
+        if (value >= 100 && value < 1000) {
+            scale = 0.80f;
+        } else if (value >= 100000) {
+            scale = 0.65f;
+        } else if (value >= 10000) {
+            scale = 0.75f;
+        }
+        return scale;
     }
 
     @SubscribeEvent
@@ -120,6 +181,27 @@ public class PreviewHudOverlay {
 
         long newTime = (long)(sliderValue * 24000);
         applyClientTime(mc, newTime);
+    }
+
+    // Fires once when any container/inventory screen opens while in preview.
+    // Resets the counters to 0 so they visibly "count up" to the real values —
+    // whether that's the (possibly stale) cached value already on hand, or the
+    // corrected value that arrives a few frames later once RequestBuildSyncPacket
+    // completes its round trip. Either way the motion stays smooth.
+    @SubscribeEvent
+    public static void onScreenOpenedForAnimation(net.minecraftforge.client.event.ScreenEvent.Init.Post event) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
+        if (!PreviewManager.isInPreview(mc.player.getUUID())) return;
+        if (!(event.getScreen() instanceof AbstractContainerScreen containerScreen)) return;
+        if (!(containerScreen instanceof net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen)
+                && !(containerScreen.getMenu() instanceof net.minecraft.world.inventory.InventoryMenu)) return;
+
+        displayedPlaced = 0f;
+        displayedBroken = 0f;
+        animTargetPlaced = Integer.MIN_VALUE;
+        animTargetBroken = Integer.MIN_VALUE;
+        remainingAnims.clear();
     }
 
     private static void renderHudCount(GuiGraphics guiGraphics, Minecraft mc, int remaining, int x, int y) {
@@ -175,6 +257,7 @@ public class PreviewHudOverlay {
 
         renderHud(event.getGuiGraphics(), mc, previewBE, mouseX, mouseY);
         renderHudButtons(event.getGuiGraphics(), mc, mouseX, mouseY);   // ← new
+        renderChangeCounter(event.getGuiGraphics(), mc, previewBE);
 
         // Tooltip for item icons
         if (cachedItemList.isEmpty()) return;
@@ -263,14 +346,68 @@ public class PreviewHudOverlay {
                     net.minecraft.network.chat.Component.literal(clearPending ? "§cAre you sure?" : "Clear all changes"),
                     mouseX, mouseY);
         } else if (mouseX >= sliderX && mouseX < sliderX + sliderW
-        && mouseY >= sliderY && mouseY < sliderY + sliderH && !sliderDragging) {
-        guiGraphics.renderTooltip(mc.font,
-                net.minecraft.network.chat.Component.literal("Drag to change time of day"),
-                mouseX, mouseY);
+                && mouseY >= sliderY && mouseY < sliderY + sliderH && !sliderDragging) {
+            guiGraphics.renderTooltip(mc.font,
+                    net.minecraft.network.chat.Component.literal("Drag to change time of day"),
+                    mouseX, mouseY);
         }
         guiGraphics.pose().popPose();
 
         drawTimeSlider(guiGraphics, mc, mouseX, mouseY);
+    }
+
+
+    private static void renderChangeCounter(GuiGraphics guiGraphics, Minecraft mc, PreviewBlockEntity previewBE) {
+        int actualPlaced = previewBE.getPendingPlacedCount();
+        int actualBroken = previewBE.getPendingBrokenCount();
+
+        long now = System.currentTimeMillis();
+
+        if (actualPlaced != animTargetPlaced || actualBroken != animTargetBroken) {
+            animStartPlaced = displayedPlaced;
+            animStartBroken = displayedBroken;
+            animTargetPlaced = actualPlaced;
+            animTargetBroken = actualBroken;
+            animStartTimePB = now;
+        }
+
+        float t = (now - animStartTimePB) / (float) COUNT_ANIM_DURATION_MS;
+        float eased = easeOutCubic(t);
+        displayedPlaced = animStartPlaced + (animTargetPlaced - animStartPlaced) * eased;
+        displayedBroken = animStartBroken + (animTargetBroken - animStartBroken) * eased;
+
+        int shownPlaced = Math.round(displayedPlaced);
+        int shownBroken = Math.round(displayedBroken);
+
+        int gap = 3;
+        int barX = hudBtnExitX;
+        int barY = hudBtnClearY;
+        int barW = hudBtnExitW - hudBtnHologramW - hudBtnClearW - gap * 2;
+        int barH = hudBtnClearH;
+
+        RenderSystem.enableBlend();
+        guiGraphics.fill(barX, barY, barX + barW, barY + barH, 0x33FFFFFF);
+        RenderSystem.disableBlend();
+
+        String placedStr = formatCount(shownPlaced);
+        String brokenStr = formatCount(shownBroken);
+        float scale = Math.min(scaleForCount(shownPlaced), scaleForCount(shownBroken));
+
+        String text = "§a+" + placedStr + " §7| §c-" + brokenStr;
+
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0, 0, 300.0f);
+
+        float centerX = barX + barW / 2f;
+        float centerY = barY + barH / 2f + 1;
+        guiGraphics.pose().translate(centerX, centerY, 0);
+        guiGraphics.pose().scale(scale, scale, 1.0f);
+
+        int textX = -mc.font.width(text) / 2;
+        int textY = -mc.font.lineHeight / 2;
+        guiGraphics.drawString(mc.font, text, textX, textY, 0xFFFFFF, false);
+
+        guiGraphics.pose().popPose();
     }
 
     private static void drawTimeSlider(GuiGraphics guiGraphics, Minecraft mc, int mouseX, int mouseY) {
@@ -476,11 +613,35 @@ public class PreviewHudOverlay {
 
         boolean inventoryOpen = mc.screen instanceof AbstractContainerScreen;
 
+        long now = System.currentTimeMillis();
+
         for (int i = 0; i < cachedItemList.size(); i++) {
             Map.Entry<Item, Integer> entry = cachedItemList.get(i);
+            Item item = entry.getKey();
             int totalNeeded = entry.getValue();
             int currentInSlot = cachedCounts.length > i ? cachedCounts[i] : 0;
-            int remaining = totalNeeded - currentInSlot;
+            int actualRemaining = totalNeeded - currentInSlot;
+
+            // Drive this item's displayed count toward actualRemaining, animating
+            // from 0 (after an inventory-open reset) or redirecting smoothly if the
+            // real value changes mid-animation (e.g. once the sync packet lands).
+            CountAnim anim = remainingAnims.computeIfAbsent(item, k -> {
+                CountAnim a = new CountAnim();
+                a.startTime = now;
+                return a;
+            });
+
+            if (anim.target != actualRemaining) {
+                anim.animStart = anim.displayed;
+                anim.target = actualRemaining;
+                anim.startTime = now;
+            }
+
+            float t = (now - anim.startTime) / (float) COUNT_ANIM_DURATION_MS;
+            float eased = easeOutCubic(t);
+            anim.displayed = anim.animStart + (anim.target - anim.animStart) * eased;
+
+            int displayedRemaining = Math.round(anim.displayed);
 
             int col = i / maxRows;
             int row = i % maxRows;
@@ -493,13 +654,7 @@ public class PreviewHudOverlay {
 
             guiGraphics.renderItem(cachedStacks[i], iconX, iconY);
 
-            String countText;
-            int textColor;
-
             if (hovered) {
-                countText = "";
-                textColor = 0;
-
                 guiGraphics.pose().pushPose();
                 guiGraphics.pose().translate(0, 0, 200.0f);
                 RenderSystem.enableBlend();
@@ -521,8 +676,8 @@ public class PreviewHudOverlay {
             }
 
 
-            if (!hovered && remaining > 0) {
-                renderHudCount(guiGraphics, mc, remaining, iconX, iconY);
+            if (!hovered && displayedRemaining > 0) {
+                renderHudCount(guiGraphics, mc, displayedRemaining, iconX, iconY);
             }
         }
     }
@@ -638,6 +793,7 @@ public class PreviewHudOverlay {
                 // is "new" and re-adds this item on the very next frame.
                 List<Map.Entry<Item, Integer>> newList = new ArrayList<>(cachedItemList);
                 newList.remove(i);
+                remainingAnims.remove(clickedItem);
                 cachedItemList = newList;
                 cachedStacks = new ItemStack[cachedItemList.size()];
                 cachedIndexMap = new HashMap<>();
