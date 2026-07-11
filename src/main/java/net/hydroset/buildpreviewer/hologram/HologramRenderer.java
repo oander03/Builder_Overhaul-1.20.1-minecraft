@@ -114,8 +114,31 @@ public class HologramRenderer {
             TintedBufferSource tinted = new TintedBufferSource(realSource, r, g, b, a, allowedFaces);
 
             try {
-                brd.renderSingleBlock(stateToRender, poseStack, tinted,
-                        LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+                if (stateToRender.getBlock() instanceof net.minecraft.world.level.block.EntityBlock entityBlock) {
+                    net.minecraft.world.level.block.entity.BlockEntity fakeBE =
+                            entityBlock.newBlockEntity(pos, stateToRender);
+
+                    if (fakeBE != null) {
+                        // BedRenderer (and several other BERs) early-return if getLevel() == null.
+                        // Give the fake BE a real level reference so it can actually render.
+                        fakeBE.setLevel(mc.level);
+
+                        var ber = mc.getBlockEntityRenderDispatcher().getRenderer(fakeBE);
+                        if (ber != null) {
+                            ber.render(fakeBE, event.getPartialTick(), poseStack, tinted,
+                                    LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+                        } else {
+                            brd.renderSingleBlock(stateToRender, poseStack, tinted,
+                                    LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+                        }
+                    } else {
+                        brd.renderSingleBlock(stateToRender, poseStack, tinted,
+                                LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+                    }
+                } else {
+                    brd.renderSingleBlock(stateToRender, poseStack, tinted,
+                            LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+                }
             } catch (Exception ignored) {}
 
             realSource.endBatch();
