@@ -632,7 +632,22 @@ public class PreviewHudOverlay {
                         new net.hydroset.buildpreviewer.networking.RemoveRequiredItemPacket(anchor, clickedItem)
                 );
 
-                resetCache();
+                // Optimistically splice the item out locally instead of resetCache().
+                // Do NOT touch lastRequirementsHash — the server's data hasn't caught up
+                // yet, and resetting it to 0 makes updateCache() think the stale data
+                // is "new" and re-adds this item on the very next frame.
+                List<Map.Entry<Item, Integer>> newList = new ArrayList<>(cachedItemList);
+                newList.remove(i);
+                cachedItemList = newList;
+                cachedStacks = new ItemStack[cachedItemList.size()];
+                cachedIndexMap = new HashMap<>();
+                for (int j = 0; j < cachedItemList.size(); j++) {
+                    cachedStacks[j] = new ItemStack(cachedItemList.get(j).getKey());
+                    cachedIndexMap.put(cachedItemList.get(j).getKey(), j);
+                }
+                if (cachedCounts.length != cachedItemList.size()) {
+                    cachedCounts = new int[cachedItemList.size()];
+                }
                 return;
             }
         }

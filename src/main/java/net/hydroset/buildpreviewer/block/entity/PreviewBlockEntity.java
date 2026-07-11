@@ -242,6 +242,12 @@ public class PreviewBlockEntity extends BlockEntity implements MenuProvider {
             PreviewBlock.commitBuild(player, blocksToPlace);
             this.buildSnapshots = remainingSnapshots;
             this.requiredItems = PreviewManager.calculateRequiredItemsFromMap(this.buildSnapshots);
+
+            // Keep PreviewManager's pendingCommit in sync with what we just placed,
+            // and push a fresh hologram packet so blocks that were just placed
+            // (and are no longer in buildSnapshots) stop showing their ghost.
+            PreviewManager.pendingCommit.put(player.getUUID(), this.buildSnapshots);
+            PreviewManager.sendHologramUpdate(player);
         } else {
             player.sendSystemMessage(Component.literal("§cNot enough items to place any more blocks!"));
         }
