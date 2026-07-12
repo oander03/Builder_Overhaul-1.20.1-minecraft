@@ -367,18 +367,6 @@ public class PreviewHudOverlay {
     private static final float COUNTER_INTENSITY_CAP = 100f;
 
 
-    private static int lerpColor(int colorA, int colorB, float t) {
-        t = Math.max(0f, Math.min(1f, t));
-        int aA = (colorA >> 24) & 0xFF, rA = (colorA >> 16) & 0xFF, gA = (colorA >> 8) & 0xFF, bA = colorA & 0xFF;
-        int aB = (colorB >> 24) & 0xFF, rB = (colorB >> 16) & 0xFF, gB = (colorB >> 8) & 0xFF, bB = colorB & 0xFF;
-        int a = Math.round(aA + (aB - aA) * t);
-        int r = Math.round(rA + (rB - rA) * t);
-        int g = Math.round(gA + (gB - gA) * t);
-        int b = Math.round(bA + (bB - bA) * t);
-        return (a << 24) | (r << 16) | (g << 8) | b;
-    }
-
-
     private static void renderChangeCounter(GuiGraphics guiGraphics, Minecraft mc, PreviewBlockEntity previewBE, int mouseX, int mouseY) {
         int actualPlaced = previewBE.getPendingPlacedCount();
         int actualBroken = previewBE.getPendingBrokenCount();
