@@ -2,6 +2,7 @@ package net.hydroset.buildpreviewer.screen;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.hydroset.buildpreviewer.BuildPreviewer;
+import net.hydroset.buildpreviewer.block.entity.PreviewBlockEntity;
 import net.hydroset.buildpreviewer.networking.FinalizeBuildPacket;
 import net.hydroset.buildpreviewer.networking.ModMessages;
 import net.hydroset.buildpreviewer.networking.TogglePreviewPacket;
@@ -90,6 +91,9 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     private static final ResourceLocation TEXTURE_SCROLL_ACTIVE =
             new ResourceLocation(BuildPreviewer.MOD_ID, "textures/gui/preview_block_gui_scroll_active.png");
 
+    private static final ResourceLocation WIDGETS_LOCATION =
+            new ResourceLocation("textures/gui/widgets.png");
+
     /** The visible texture width (your PNG). imageWidth is wider to allow scrollbar overflow. */
     private static final int TEXTURE_RENDER_WIDTH = 184;
 
@@ -98,6 +102,140 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     private Button hologramButton;
     private Button clearButton;
 
+    // ---- Change counter (placed/broken) ----
+    private static final long COUNT_ANIM_DURATION_MS = 450L;
+    private static final int COUNTER_BAR_ALPHA = 0x70; // max opacity once fully "lit up"
+    private static final int COUNTER_GREEN_RGB = 0x00CC44;
+    private static final int COUNTER_RED_RGB   = 0xCC2222;
+    private static final float COUNTER_INTENSITY_CAP = 100f;
+
+    private float displayedPlaced = 0f;
+    private float displayedBroken = 0f;
+    private float animStartPlaced = 0f;
+    private float animStartBroken = 0f;
+    private int animTargetPlaced = Integer.MIN_VALUE;
+    private int animTargetBroken = Integer.MIN_VALUE;
+    private long animStartTimePB = 0L;
+
+    private int counterBarX, counterBarY, counterBarW, counterBarH;
+
+    private static float easeOutCubic(float t) {
+        t = Math.max(0f, Math.min(1f, t));
+        float f = t - 1f;
+        return f * f * f + 1f;
+    }
+
+    private static String formatCount(int value) {
+        if (value >= 1000) return (value / 1000) + "k";
+        return String.valueOf(value);
+    }
+
+    private static float scaleForCount(int value) {
+        if (value >= 100000) return 0.65f;
+        if (value >= 10000) return 0.75f;
+        if (value >= 100) return 0.80f;
+        return 1.0f;
+    }
+
+    private static int lerpColor(int colorA, int colorB, float t) {
+        t = Math.max(0f, Math.min(1f, t));
+        int aA = (colorA >> 24) & 0xFF, rA = (colorA >> 16) & 0xFF, gA = (colorA >> 8) & 0xFF, bA = colorA & 0xFF;
+        int aB = (colorB >> 24) & 0xFF, rB = (colorB >> 16) & 0xFF, gB = (colorB >> 8) & 0xFF, bB = colorB & 0xFF;
+        int a = Math.round(aA + (aB - aA) * t);
+        int r = Math.round(rA + (rB - rA) * t);
+        int g = Math.round(gA + (gB - gA) * t);
+        int b = Math.round(bA + (bB - bA) * t);
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    private void renderChangeCounter(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        PreviewBlockEntity be = this.menu.getBlockEntity();
+        int actualPlaced = be.getPendingPlacedCount();
+        int actualBroken = be.getPendingBrokenCount();
+
+        long now = System.currentTimeMillis();
+        if (actualPlaced != animTargetPlaced || actualBroken != animTargetBroken) {
+            animStartPlaced = displayedPlaced;
+            animStartBroken = displayedBroken;
+            animTargetPlaced = actualPlaced;
+            animTargetBroken = actualBroken;
+            animStartTimePB = now;
+        }
+
+        float t = (now - animStartTimePB) / (float) COUNT_ANIM_DURATION_MS;
+        float eased = easeOutCubic(t);
+        displayedPlaced = animStartPlaced + (animTargetPlaced - animStartPlaced) * eased;
+        displayedBroken = animStartBroken + (animTargetBroken - animStartBroken) * eased;
+
+        int shownPlaced = Math.round(displayedPlaced);
+        int shownBroken = Math.round(displayedBroken);
+
+        float greenIntensity = Math.min(1f, displayedPlaced / COUNTER_INTENSITY_CAP);
+        float redIntensity = Math.min(1f, displayedBroken / COUNTER_INTENSITY_CAP);
+        int greenAlpha = Math.round(greenIntensity * COUNTER_BAR_ALPHA);
+        int redAlpha = Math.round(redIntensity * COUNTER_BAR_ALPHA);
+        int greenColor = (greenAlpha << 24) | COUNTER_GREEN_RGB;
+        int redColor = (redAlpha << 24) | COUNTER_RED_RGB;
+
+        boolean hovered = mouseX >= counterBarX && mouseX < counterBarX + counterBarW
+                && mouseY >= counterBarY && mouseY < counterBarY + counterBarH;
+
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+
+        // Draw the actual vanilla button 9-slice texture — same atlas region Button
+        // itself uses. 66 = normal state strip, 86 = hovered strip in widgets.png.
+        int textureY = hovered ? 86 : 66;
+        guiGraphics.blitNineSliced(WIDGETS_LOCATION, counterBarX, counterBarY, counterBarW, counterBarH, 20, 4, 200, 20, 0, textureY);
+
+        // Left half tints green (alpha scales with placed count), right half tints red
+        // (alpha scales with broken count). At 0/0 both are fully transparent, so the
+        // raw button texture shows through untinted.
+// Smooth per-column gradient instead of two flat halves — green fades OUT toward
+        // the center, red fades IN from the center, so there's no hard seam and the
+        // middle stays clean (near-transparent) when either count is low.
+        // Inset by 1px on all sides so the button's black border stays visible.
+        for (int col = 1; col < counterBarW - 1; col++) {
+            float frac = counterBarW <= 1 ? 0f : (float) col / (counterBarW - 1);
+            int columnColor;
+            if (frac <= 0.5f) {
+                float localT = frac / 0.5f; // 0 at left edge -> 1 at center
+                int a = Math.round(greenAlpha * (1f - localT));
+                columnColor = (a << 24) | COUNTER_GREEN_RGB;
+            } else {
+                float localT = (frac - 0.5f) / 0.5f; // 0 at center -> 1 at right edge
+                int a = Math.round(redAlpha * localT);
+                columnColor = (a << 24) | COUNTER_RED_RGB;
+            }
+            guiGraphics.fill(counterBarX + col, counterBarY + 1, counterBarX + col + 1, counterBarY + counterBarH - 1, columnColor);
+        }
+        RenderSystem.disableBlend();
+
+        String placedStr = formatCount(shownPlaced);
+        String brokenStr = formatCount(shownBroken);
+        float scale = Math.min(scaleForCount(shownPlaced), scaleForCount(shownBroken));
+        String text = "§a+" + placedStr + " §7| §c-" + brokenStr;
+
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0, 0, 300.0f);
+        float centerX = counterBarX + counterBarW / 2f;
+        float centerY = counterBarY + counterBarH / 2f;
+        guiGraphics.pose().translate(centerX, centerY, 0);
+        guiGraphics.pose().scale(scale, scale, 1.0f);
+        int textX = -this.font.width(text) / 2;
+        int textY = -this.font.lineHeight / 2;
+        guiGraphics.drawString(this.font, text, textX, textY, 0xFFFFFF, true);
+        guiGraphics.pose().popPose();
+
+        if (hovered) {
+            guiGraphics.pose().pushPose();
+            guiGraphics.pose().translate(0, 0, 400.0f);
+            guiGraphics.renderTooltip(this.font,
+                    Component.literal("Blocks placed | Blocks broken"),
+                    mouseX, mouseY);
+            guiGraphics.pose().popPose();
+        }
+    }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
@@ -319,12 +457,6 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         // 4. Update our cache (ensures we aren't doing Map conversions 100x a second)
         updateRequirementCache();
 
-        if (cachedReqList.isEmpty()) return;
-
-        // 5. Custom Requirement Rendering
-        int startIndex = menu.scrollOffset * 9;
-
-        long frameTime = System.currentTimeMillis();
 
         // Lerp smooth scroll toward target
         float scrollLerpSpeed = 0.2f;
@@ -653,6 +785,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             }
         }
 
+        renderChangeCounter(guiGraphics, mouseX, mouseY);
 
         renderTooltip(guiGraphics, mouseX, mouseY);
     }
@@ -740,6 +873,14 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
                 .tooltip(Tooltip.create(Component.literal("Clear all changes")))
                 .build();
         this.addRenderableWidget(this.clearButton);
+
+        // Position the counter directly above the hologram/clear mini-buttons
+        counterBarX = startX + finalizeWidth + spacing + toggleWidth + 11;
+        counterBarW = 55;
+        counterBarH = 20;
+        counterBarY = buttonY;
+
+
     }
 
     @Override

@@ -360,14 +360,12 @@ public class PreviewHudOverlay {
         drawTimeSlider(guiGraphics, mc, mouseX, mouseY);
     }
 
-    private static final int COUNTER_BAR_ALPHA = 0x99; // ~60% opacity — bump/lower to taste
-    private static final int COUNTER_GREY       = (COUNTER_BAR_ALPHA << 24) | 0x808080;
-    private static final int COUNTER_GREEN_FULL  = (COUNTER_BAR_ALPHA << 24) | 0x00CC44;
-    private static final int COUNTER_RED_FULL    = (COUNTER_BAR_ALPHA << 24) | 0xCC2222;
-
-    // How many blocks placed/broken it takes to reach FULL color saturation.
-    // Lower = colors ramp up to vivid green/red faster; higher = more gradual.
+    private static final int COUNTER_BASE_FILL = 0x33FFFFFF; // matches drawVanillaButton's base fill
+    private static final int COUNTER_GREEN_RGB = 0x00CC44;
+    private static final int COUNTER_RED_RGB   = 0xCC2222;
+    private static final int COUNTER_TINT_ALPHA = 0x70; // max tint opacity once fully "lit up"
     private static final float COUNTER_INTENSITY_CAP = 100f;
+
 
     private static int lerpColor(int colorA, int colorB, float t) {
         t = Math.max(0f, Math.min(1f, t));
@@ -411,20 +409,30 @@ public class PreviewHudOverlay {
 
 // Intensity driven by the live animated values, so the color ramps up
         // in step with the count-up animation rather than jumping instantly.
+        // Base fill matches the other HUD buttons (Exit Builder, hologram, clear) exactly.
+        RenderSystem.enableBlend();
+        guiGraphics.fill(barX, barY, barX + barW, barY + barH, COUNTER_BASE_FILL);
+
+        // Intensity driven by the live animated values, so the color ramps up
+        // in step with the count-up animation rather than jumping instantly.
         float greenIntensity = Math.min(1f, displayedPlaced / COUNTER_INTENSITY_CAP);
         float redIntensity = Math.min(1f, displayedBroken / COUNTER_INTENSITY_CAP);
+        int greenAlpha = Math.round(greenIntensity * COUNTER_TINT_ALPHA);
+        int redAlpha = Math.round(redIntensity * COUNTER_TINT_ALPHA);
 
-        int greenColor = lerpColor(COUNTER_GREY, COUNTER_GREEN_FULL, greenIntensity);
-        int redColor = lerpColor(COUNTER_GREY, COUNTER_RED_FULL, redIntensity);
-
-        RenderSystem.enableBlend();
+        // Green fades OUT toward the center, red fades IN from the center — no hard
+        // seam, and the middle stays as the plain base fill when either count is low.
         for (int col = 0; col < barW; col++) {
             float frac = barW <= 1 ? 0f : (float) col / (barW - 1);
             int columnColor;
             if (frac <= 0.5f) {
-                columnColor = lerpColor(greenColor, COUNTER_GREY, frac / 0.5f);
+                float localT = frac / 0.5f;
+                int a = Math.round(greenAlpha * (1f - localT));
+                columnColor = (a << 24) | COUNTER_GREEN_RGB;
             } else {
-                columnColor = lerpColor(COUNTER_GREY, redColor, (frac - 0.5f) / 0.5f);
+                float localT = (frac - 0.5f) / 0.5f;
+                int a = Math.round(redAlpha * localT);
+                columnColor = (a << 24) | COUNTER_RED_RGB;
             }
             guiGraphics.fill(barX + col, barY, barX + col + 1, barY + barH, columnColor);
         }
@@ -440,7 +448,7 @@ public class PreviewHudOverlay {
         guiGraphics.pose().translate(0, 0, 300.0f);
 
         float centerX = barX + barW / 2f;
-        float centerY = barY + barH / 2f + 1;
+        float centerY = barY + barH / 2f;
         guiGraphics.pose().translate(centerX, centerY, 0);
         guiGraphics.pose().scale(scale, scale, 1.0f);
 
@@ -540,7 +548,7 @@ public class PreviewHudOverlay {
         guiGraphics.pose().translate(0, 0, 300.0f);
         int textX = sliderX + (sliderW - mc.font.width(timeLabel)) / 2;
         int textY = sliderY + (sliderH - mc.font.lineHeight) / 2 + 1;
-        guiGraphics.drawString(mc.font, timeLabel, textX, textY, 0xFFFFFF, true);
+        guiGraphics.drawString(mc.font, timeLabel, textX, textY, 0xFFFFFF, false);
         guiGraphics.pose().popPose();
 
         RenderSystem.disableBlend();
