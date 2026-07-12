@@ -257,7 +257,7 @@ public class PreviewHudOverlay {
 
         renderHud(event.getGuiGraphics(), mc, previewBE, mouseX, mouseY);
         renderHudButtons(event.getGuiGraphics(), mc, mouseX, mouseY);   // ← new
-        renderChangeCounter(event.getGuiGraphics(), mc, previewBE);
+        renderChangeCounter(event.getGuiGraphics(), mc, previewBE, mouseX, mouseY);
 
         // Tooltip for item icons
         if (cachedItemList.isEmpty()) return;
@@ -337,7 +337,11 @@ public class PreviewHudOverlay {
 // Tooltips — rendered last so they always appear on top
         guiGraphics.pose().pushPose();
         guiGraphics.pose().translate(0, 0, 400.0f);
-        if (hudBtnHologramHovered) {
+        if (hudBtnExitHovered) {
+            guiGraphics.renderTooltip(mc.font,
+                    net.minecraft.network.chat.Component.literal("Exit and return world back to normal."),
+                    mouseX, mouseY);
+        } else if (hudBtnHologramHovered) {
             guiGraphics.renderTooltip(mc.font,
                     net.minecraft.network.chat.Component.literal(hologramsOn ? "Hide holograms" : "Show holograms"),
                     mouseX, mouseY);
@@ -356,8 +360,28 @@ public class PreviewHudOverlay {
         drawTimeSlider(guiGraphics, mc, mouseX, mouseY);
     }
 
+    private static final int COUNTER_BAR_ALPHA = 0x99; // ~60% opacity — bump/lower to taste
+    private static final int COUNTER_GREY       = (COUNTER_BAR_ALPHA << 24) | 0x808080;
+    private static final int COUNTER_GREEN_FULL  = (COUNTER_BAR_ALPHA << 24) | 0x00CC44;
+    private static final int COUNTER_RED_FULL    = (COUNTER_BAR_ALPHA << 24) | 0xCC2222;
 
-    private static void renderChangeCounter(GuiGraphics guiGraphics, Minecraft mc, PreviewBlockEntity previewBE) {
+    // How many blocks placed/broken it takes to reach FULL color saturation.
+    // Lower = colors ramp up to vivid green/red faster; higher = more gradual.
+    private static final float COUNTER_INTENSITY_CAP = 100f;
+
+    private static int lerpColor(int colorA, int colorB, float t) {
+        t = Math.max(0f, Math.min(1f, t));
+        int aA = (colorA >> 24) & 0xFF, rA = (colorA >> 16) & 0xFF, gA = (colorA >> 8) & 0xFF, bA = colorA & 0xFF;
+        int aB = (colorB >> 24) & 0xFF, rB = (colorB >> 16) & 0xFF, gB = (colorB >> 8) & 0xFF, bB = colorB & 0xFF;
+        int a = Math.round(aA + (aB - aA) * t);
+        int r = Math.round(rA + (rB - rA) * t);
+        int g = Math.round(gA + (gB - gA) * t);
+        int b = Math.round(bA + (bB - bA) * t);
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+
+    private static void renderChangeCounter(GuiGraphics guiGraphics, Minecraft mc, PreviewBlockEntity previewBE, int mouseX, int mouseY) {
         int actualPlaced = previewBE.getPendingPlacedCount();
         int actualBroken = previewBE.getPendingBrokenCount();
 
@@ -385,8 +409,25 @@ public class PreviewHudOverlay {
         int barW = hudBtnExitW - hudBtnHologramW - hudBtnClearW - gap * 2;
         int barH = hudBtnClearH;
 
+// Intensity driven by the live animated values, so the color ramps up
+        // in step with the count-up animation rather than jumping instantly.
+        float greenIntensity = Math.min(1f, displayedPlaced / COUNTER_INTENSITY_CAP);
+        float redIntensity = Math.min(1f, displayedBroken / COUNTER_INTENSITY_CAP);
+
+        int greenColor = lerpColor(COUNTER_GREY, COUNTER_GREEN_FULL, greenIntensity);
+        int redColor = lerpColor(COUNTER_GREY, COUNTER_RED_FULL, redIntensity);
+
         RenderSystem.enableBlend();
-        guiGraphics.fill(barX, barY, barX + barW, barY + barH, 0x33FFFFFF);
+        for (int col = 0; col < barW; col++) {
+            float frac = barW <= 1 ? 0f : (float) col / (barW - 1);
+            int columnColor;
+            if (frac <= 0.5f) {
+                columnColor = lerpColor(greenColor, COUNTER_GREY, frac / 0.5f);
+            } else {
+                columnColor = lerpColor(COUNTER_GREY, redColor, (frac - 0.5f) / 0.5f);
+            }
+            guiGraphics.fill(barX + col, barY, barX + col + 1, barY + barH, columnColor);
+        }
         RenderSystem.disableBlend();
 
         String placedStr = formatCount(shownPlaced);
@@ -408,6 +449,18 @@ public class PreviewHudOverlay {
         guiGraphics.drawString(mc.font, text, textX, textY, 0xFFFFFF, false);
 
         guiGraphics.pose().popPose();
+
+        // Tooltip — rendered at a higher Z, after the text, using un-scaled bar bounds
+        boolean counterHovered = mouseX >= barX && mouseX < barX + barW
+                && mouseY >= barY && mouseY < barY + barH;
+        if (counterHovered) {
+            guiGraphics.pose().pushPose();
+            guiGraphics.pose().translate(0, 0, 400.0f);
+            guiGraphics.renderTooltip(mc.font,
+                    net.minecraft.network.chat.Component.literal("Blocks placed | Blocks broken "),
+                    mouseX, mouseY);
+            guiGraphics.pose().popPose();
+        }
     }
 
     private static void drawTimeSlider(GuiGraphics guiGraphics, Minecraft mc, int mouseX, int mouseY) {
