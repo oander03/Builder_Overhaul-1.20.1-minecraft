@@ -807,12 +807,12 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
             slotBubbles.add(new ArrayList<>());
         }
 
-        int finalizeWidth = 62;
-        int toggleWidth = 94;
-        int spacing = 4;
+        int finalizeWidth = 64;
+        int toggleWidth = 93;
+        int spacing = 5;
 
         int totalWidth = finalizeWidth + toggleWidth + spacing;
-        int startX = this.leftPos + (this.imageWidth / 2) - (totalWidth / 2) -3;
+        int startX = this.leftPos + (this.imageWidth / 2) - (totalWidth / 2) - 4;
         int buttonY = this.topPos + this.imageHeight - 28;
 
 // 1. Finalize Button
@@ -850,7 +850,7 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
                             net.hydroset.buildpreviewer.hologram.HologramRenderer.setHologramsEnabled(
                                     !net.hydroset.buildpreviewer.hologram.HologramRenderer.isHologramsEnabled());
                         })
-                .bounds(startX - 20 - 3 - 10, buttonY, 20, 20)
+                .bounds(startX - 20 - 1 - 10, buttonY, 20, 20)
                 .tooltip(Tooltip.create(Component.literal("Toggle holograms")))
                 .build();
         this.addRenderableWidget(this.hologramButton);
