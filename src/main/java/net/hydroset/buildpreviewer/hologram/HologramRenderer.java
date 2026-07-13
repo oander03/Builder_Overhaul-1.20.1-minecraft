@@ -80,6 +80,8 @@ public class HologramRenderer {
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.depthMask(false);
+        RenderSystem.disableDepthTest();   // ← new: stop clouds/weather/etc. from occluding via stale depth values
+
 
         GL11.glEnable(GL11.GL_POLYGON_OFFSET_FILL);
         GL11.glPolygonOffset(-2f, -2f);
@@ -149,6 +151,7 @@ public class HologramRenderer {
         GL11.glDisable(GL11.GL_POLYGON_OFFSET_FILL);
         RenderSystem.enableCull();
         RenderSystem.depthMask(true);
+        RenderSystem.enableDepthTest();   // ← new: restore for everything rendered after you
         RenderSystem.disableBlend();
     }
 
