@@ -1,6 +1,5 @@
 package net.hydroset.buildpreviewer;
 
-import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -49,60 +48,69 @@ public class ClientRenderEvents {
         double camY = event.getCamera().getPosition().y;
         double camZ = event.getCamera().getPosition().z;
 
-        double cx = anchorPos.getX() + 0.5;
-        double cy = anchorPos.getY() + 0.5;
-        double cz = anchorPos.getZ() + 0.5;
-        double vx = camX - cx;
-        double vy = camY - cy;
-        double vz = camZ - cz;
-
-        boolean drawWest  = vx > 0;
-        boolean drawEast  = vx < 0;
-        boolean drawDown  = vy > 0;
-        boolean drawUp    = vy < 0;
-        boolean drawNorth = vz > 0;
-        boolean drawSouth = vz < 0;
-
         PoseStack poseStack = event.getPoseStack();
         poseStack.pushPose();
         poseStack.translate(anchorPos.getX() - camX, anchorPos.getY() - camY, anchorPos.getZ() - camZ);
 
         // True, unexpanded cube matrix — captured BEFORE the expand scale.
-        Matrix4f trueMatrix = poseStack.last().pose();
+        Matrix4f trueMatrix = new Matrix4f(poseStack.last().pose());
 
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
-        RenderSystem.disableCull();
-
-        // --- Depth-only pre-pass ---
-        // Draw our own true-sized cube with color writes disabled. This
-        // overwrites whatever depth vanilla wrote for this block with depth
-        // generated from the exact same matrix math the shell will use,
-        // so there's no mismatch left to z-fight against.
-        RenderSystem.depthMask(true);
-        RenderSystem.colorMask(false, false, false, false);
-
-        Tesselator depthTess = Tesselator.getInstance();
-        BufferBuilder depthBuf = depthTess.getBuilder();
-        depthBuf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-        drawFaceDown(trueMatrix, depthBuf, 1, 1, 1, 1);
-        drawFaceUp(trueMatrix, depthBuf, 1, 1, 1, 1);
-        drawFaceNorth(trueMatrix, depthBuf, 1, 1, 1, 1);
-        drawFaceSouth(trueMatrix, depthBuf, 1, 1, 1, 1);
-        drawFaceWest(trueMatrix, depthBuf, 1, 1, 1, 1);
-        drawFaceEast(trueMatrix, depthBuf, 1, 1, 1, 1);
-        depthTess.end();
-
-        RenderSystem.colorMask(true, true, true, true);
-
-        // --- Expand outward for the shell ---
+        // Expand outward for the shell. Captured now so both the pre-pass
+        // and the final shell draw use the exact same expanded matrix.
         float expand = 0.06f;
         poseStack.translate(0.5, 0.5, 0.5);
         poseStack.scale(1.0f + expand, 1.0f + expand, 1.0f + expand);
         poseStack.translate(-0.5, -0.5, -0.5);
-
         Matrix4f matrix = poseStack.last().pose();
 
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        RenderSystem.enableCull();
+        GL11.glCullFace(GL11.GL_FRONT); // layer 1 must match the shell: far faces only
+
+        RenderSystem.depthMask(true);
+        RenderSystem.colorMask(false, false, false, false);
+
+        // --- Depth pre-pass, layer 1 ---
+        // Force-write the EXPANDED cube's depth everywhere, ignoring what's
+        // already in the depth buffer. This guarantees the rim area always
+        // beats neighboring blocks, regardless of which is physically closer.
+        RenderSystem.depthFunc(GL11.GL_ALWAYS);
+        Tesselator tess1 = Tesselator.getInstance();
+        BufferBuilder buf1 = tess1.getBuilder();
+        buf1.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+        drawFaceDown(matrix, buf1, 1, 1, 1, 1);
+        drawFaceUp(matrix, buf1, 1, 1, 1, 1);
+        drawFaceNorth(matrix, buf1, 1, 1, 1, 1);
+        drawFaceSouth(matrix, buf1, 1, 1, 1, 1);
+        drawFaceWest(matrix, buf1, 1, 1, 1, 1);
+        drawFaceEast(matrix, buf1, 1, 1, 1, 1);
+        tess1.end();
+        RenderSystem.disableCull(); // layer 2 needs all faces for a correct nearest-depth test
+
+
+        // --- Depth pre-pass, layer 2 ---
+        // Write the TRUE (unexpanded) cube's depth back on top, but only
+        // where it's actually closer than what layer 1 just wrote. This
+        // carves out the block's own footprint, so the shell's far faces
+        // get correctly hidden over the real block's own near faces —
+        // leaving only the thin rim sliver from layer 1 exposed.
+        RenderSystem.depthFunc(GL11.GL_LESS);
+        Tesselator tess2 = Tesselator.getInstance();
+        BufferBuilder buf2 = tess2.getBuilder();
+        buf2.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+        drawFaceDown(trueMatrix, buf2, 1, 1, 1, 1);
+        drawFaceUp(trueMatrix, buf2, 1, 1, 1, 1);
+        drawFaceNorth(trueMatrix, buf2, 1, 1, 1, 1);
+        drawFaceSouth(trueMatrix, buf2, 1, 1, 1, 1);
+        drawFaceWest(trueMatrix, buf2, 1, 1, 1, 1);
+        drawFaceEast(trueMatrix, buf2, 1, 1, 1, 1);
+        tess2.end();
+
+        RenderSystem.depthFunc(GL11.GL_LEQUAL);
+        RenderSystem.colorMask(true, true, true, true);
+
+        // --- Draw the shell ---
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.depthMask(false);
@@ -115,13 +123,10 @@ public class ClientRenderEvents {
         RenderSystem.enableCull();
         GL11.glCullFace(GL11.GL_FRONT); // keep only far-side faces
 
-
         Tesselator tesselator = Tesselator.getInstance();
         BufferBuilder buffer = tesselator.getBuilder();
         buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
 
-        // Submit ALL 6 faces now — GL culling decides visibility per-triangle,
-        // not a CPU sign test, so there's no axis-degenerate flip.
         drawFaceDown(matrix, buffer, r, g, b, a);
         drawFaceUp(matrix, buffer, r, g, b, a);
         drawFaceNorth(matrix, buffer, r, g, b, a);
