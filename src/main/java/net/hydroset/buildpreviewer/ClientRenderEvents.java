@@ -1,10 +1,17 @@
 package net.hydroset.buildpreviewer;
 
+import com.mojang.blaze3d.platform.GlStateManager;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import net.hydroset.buildpreviewer.block.ModBlocks;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.ItemBlockRenderTypes;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
@@ -14,6 +21,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import org.joml.Matrix4f;
+import org.lwjgl.opengl.GL11;
 
 @Mod.EventBusSubscriber(modid = BuildPreviewer.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class ClientRenderEvents {
@@ -21,111 +29,156 @@ public class ClientRenderEvents {
     @SubscribeEvent
     public static void onClientSetup(FMLClientSetupEvent event) {
         ItemBlockRenderTypes.setRenderLayer(ModBlocks.BUILDACCESS_BLOCK.get(),
-                renderType -> renderType == RenderType.solid() || renderType == RenderType.translucent());
+                renderType -> renderType == RenderType.solid());
     }
 
     @SubscribeEvent
     public static void onRenderOutline(RenderLevelStageEvent event) {
-        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_ENTITIES) return;
+        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) return;
 
-        LocalPlayer player = Minecraft.getInstance().player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) return;
 
-        if (PreviewManager.isInPreview(player.getUUID())) {
-            BlockPos anchorPos = PreviewManager.getAnchorPos(player.getUUID());
-            if (anchorPos == null) return;
+        if (!PreviewManager.isInPreview(player.getUUID())) return;
 
-            // 1. Calculate distance for scaling
-            double distSq = player.distanceToSqr(anchorPos.getX(), anchorPos.getY(), anchorPos.getZ());
-            double dist = Math.sqrt(distSq);
+        BlockPos anchorPos = PreviewManager.getAnchorPos(player.getUUID());
+        if (anchorPos == null) return;
 
-            // 2. Dynamic thickness:
-            // Base thickness (0.02) multiplied by a factor of the distance.
-            // We use Math.max to ensure it never disappears when you're standing on it.
-            float thickness = (float) Math.max(0.02f, (dist * 0.005f));
+        double camX = event.getCamera().getPosition().x;
+        double camY = event.getCamera().getPosition().y;
+        double camZ = event.getCamera().getPosition().z;
 
-            PoseStack poseStack = event.getPoseStack();
-            double camX = event.getCamera().getPosition().x;
-            double camY = event.getCamera().getPosition().y;
-            double camZ = event.getCamera().getPosition().z;
+        double cx = anchorPos.getX() + 0.5;
+        double cy = anchorPos.getY() + 0.5;
+        double cz = anchorPos.getZ() + 0.5;
+        double vx = camX - cx;
+        double vy = camY - cy;
+        double vz = camZ - cz;
 
-            poseStack.pushPose();
-            poseStack.translate(anchorPos.getX() - camX, anchorPos.getY() - camY, anchorPos.getZ() - camZ);
+        boolean drawWest  = vx > 0;
+        boolean drawEast  = vx < 0;
+        boolean drawDown  = vy > 0;
+        boolean drawUp    = vy < 0;
+        boolean drawNorth = vz > 0;
+        boolean drawSouth = vz < 0;
 
-            var outlineBuffers = Minecraft.getInstance().renderBuffers().outlineBufferSource();
-            outlineBuffers.setColor(165, 246, 59, 255);
+        PoseStack poseStack = event.getPoseStack();
+        poseStack.pushPose();
+        poseStack.translate(anchorPos.getX() - camX, anchorPos.getY() - camY, anchorPos.getZ() - camZ);
 
-            VertexConsumer buffer = outlineBuffers.getBuffer(RenderType.outline(
-                    new net.minecraft.resources.ResourceLocation("textures/misc/white.png")));
+        // True, unexpanded cube matrix — captured BEFORE the expand scale.
+        Matrix4f trueMatrix = poseStack.last().pose();
 
-            // 3. Pass the new dynamic thickness
-            drawSpectralLines(poseStack, buffer, 1.0F, 0.6F, 0.0F, 1.0F, thickness);
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        RenderSystem.disableCull();
 
-            poseStack.popPose();
-            outlineBuffers.endOutlineBatch();
-        }
-    }
+        // --- Depth-only pre-pass ---
+        // Draw our own true-sized cube with color writes disabled. This
+        // overwrites whatever depth vanilla wrote for this block with depth
+        // generated from the exact same matrix math the shell will use,
+        // so there's no mismatch left to z-fight against.
+        RenderSystem.depthMask(true);
+        RenderSystem.colorMask(false, false, false, false);
 
-    private static void drawSpectralLines(PoseStack poseStack, VertexConsumer buffer, float r, float g, float b, float a, float t) {
+        Tesselator depthTess = Tesselator.getInstance();
+        BufferBuilder depthBuf = depthTess.getBuilder();
+        depthBuf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+        drawFaceDown(trueMatrix, depthBuf, 1, 1, 1, 1);
+        drawFaceUp(trueMatrix, depthBuf, 1, 1, 1, 1);
+        drawFaceNorth(trueMatrix, depthBuf, 1, 1, 1, 1);
+        drawFaceSouth(trueMatrix, depthBuf, 1, 1, 1, 1);
+        drawFaceWest(trueMatrix, depthBuf, 1, 1, 1, 1);
+        drawFaceEast(trueMatrix, depthBuf, 1, 1, 1, 1);
+        depthTess.end();
+
+        RenderSystem.colorMask(true, true, true, true);
+
+        // --- Expand outward for the shell ---
+        float expand = 0.06f;
+        poseStack.translate(0.5, 0.5, 0.5);
+        poseStack.scale(1.0f + expand, 1.0f + expand, 1.0f + expand);
+        poseStack.translate(-0.5, -0.5, -0.5);
+
         Matrix4f matrix = poseStack.last().pose();
 
-        // Bottom 4 edges
-        drawBox(matrix, buffer, 0, 0, 0, 1, t, t, r, g, b, a);
-        drawBox(matrix, buffer, 0, 0, 1-t, 1, t, t, r, g, b, a);
-        drawBox(matrix, buffer, 0, 0, 0, t, t, 1, r, g, b, a);
-        drawBox(matrix, buffer, 1-t, 0, 0, t, t, 1, r, g, b, a);
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.depthMask(false);
 
-        // Top 4 edges
-        drawBox(matrix, buffer, 0, 1-t, 0, 1, t, t, r, g, b, a);
-        drawBox(matrix, buffer, 0, 1-t, 1-t, 1, t, t, r, g, b, a);
-        drawBox(matrix, buffer, 0, 1-t, 0, t, t, 1, r, g, b, a);
-        drawBox(matrix, buffer, 1-t, 1-t, 0, t, t, 1, r, g, b, a);
+        float r = 0.65f, g = 0.96f, b = 0.23f, a = 1f;
 
-        // 4 Vertical Pillars
-        drawBox(matrix, buffer, 0, 0, 0, t, 1, t, r, g, b, a);
-        drawBox(matrix, buffer, 1-t, 0, 0, t, 1, t, r, g, b, a);
-        drawBox(matrix, buffer, 0, 0, 1-t, t, 1, t, r, g, b, a);
-        drawBox(matrix, buffer, 1-t, 0, 1-t, t, 1, t, r, g, b, a);
+        RenderSystem.polygonOffset(-1.0f, -1.0f);
+        RenderSystem.enablePolygonOffset();
+
+        RenderSystem.enableCull();
+        GL11.glCullFace(GL11.GL_FRONT); // keep only far-side faces
+
+
+        Tesselator tesselator = Tesselator.getInstance();
+        BufferBuilder buffer = tesselator.getBuilder();
+        buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+
+        // Submit ALL 6 faces now — GL culling decides visibility per-triangle,
+        // not a CPU sign test, so there's no axis-degenerate flip.
+        drawFaceDown(matrix, buffer, r, g, b, a);
+        drawFaceUp(matrix, buffer, r, g, b, a);
+        drawFaceNorth(matrix, buffer, r, g, b, a);
+        drawFaceSouth(matrix, buffer, r, g, b, a);
+        drawFaceWest(matrix, buffer, r, g, b, a);
+        drawFaceEast(matrix, buffer, r, g, b, a);
+
+        tesselator.end();
+        RenderSystem.disablePolygonOffset();
+
+        GL11.glCullFace(GL11.GL_BACK); // restore default
+        RenderSystem.depthMask(true);
+        RenderSystem.disableBlend();
+        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+
+        poseStack.popPose();
     }
 
-    private static void drawBox(Matrix4f matrix, VertexConsumer buffer, float x, float y, float z, float width, float height, float depth, float r, float g, float b, float a) {
-        float x2 = x + width;
-        float y2 = y + height;
-        float z2 = z + depth;
+    private static void drawFaceDown(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
+        buffer.vertex(matrix, 0, 0, 0).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 1, 0, 0).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 1, 0, 1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 0, 0, 1).color(r, g, b, a).endVertex();
+    }
 
-        // We draw the 6 faces of a tiny stick. The Outline shader uses these
-        // surfaces to determine the "glow" area.
+    private static void drawFaceUp(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
+        buffer.vertex(matrix, 0, 1, 0).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 0, 1, 1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 1, 1, 1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 1, 1, 0).color(r, g, b, a).endVertex();
+    }
 
-        // Bottom
-        buffer.vertex(matrix, x, y, z).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2, y, z).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2, y, z2).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x, y, z2).color(r, g, b, a).endVertex();
-        // Top
-        buffer.vertex(matrix, x, y2, z).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x, y2, z2).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2, y2, z2).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2, y2, z).color(r, g, b, a).endVertex();
-        // North
-        buffer.vertex(matrix, x, y, z).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x, y2, z).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2, y2, z).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2, y, z).color(r, g, b, a).endVertex();
-        // South
-        buffer.vertex(matrix, x, y, z2).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2, y, z2).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2, y2, z2).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x, y2, z2).color(r, g, b, a).endVertex();
-        // West
-        buffer.vertex(matrix, x, y, z).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x, y, z2).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x, y2, z2).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x, y2, z).color(r, g, b, a).endVertex();
-        // East
-        buffer.vertex(matrix, x2, y, z).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2, y2, z).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2, y2, z2).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2, y, z2).color(r, g, b, a).endVertex();
+    private static void drawFaceNorth(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
+        buffer.vertex(matrix, 0, 0, 0).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 0, 1, 0).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 1, 1, 0).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 1, 0, 0).color(r, g, b, a).endVertex();
+    }
+
+    private static void drawFaceSouth(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
+        buffer.vertex(matrix, 0, 0, 1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 1, 0, 1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 1, 1, 1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 0, 1, 1).color(r, g, b, a).endVertex();
+    }
+
+    private static void drawFaceWest(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
+        buffer.vertex(matrix, 0, 0, 0).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 0, 0, 1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 0, 1, 1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 0, 1, 0).color(r, g, b, a).endVertex();
+    }
+
+    private static void drawFaceEast(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
+        buffer.vertex(matrix, 1, 0, 0).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 1, 1, 0).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 1, 1, 1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, 1, 0, 1).color(r, g, b, a).endVertex();
     }
 }
-
