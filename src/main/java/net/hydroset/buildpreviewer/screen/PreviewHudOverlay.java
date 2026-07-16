@@ -255,8 +255,9 @@ public class PreviewHudOverlay {
         int mouseX = (int)(mc.mouseHandler.xpos() * mc.getWindow().getGuiScaledWidth() / mc.getWindow().getScreenWidth());
         int mouseY = (int)(mc.mouseHandler.ypos() * mc.getWindow().getGuiScaledHeight() / mc.getWindow().getScreenHeight());
 
+        int[] bounds = getScreenBounds(containerScreen);
         renderHud(event.getGuiGraphics(), mc, previewBE, mouseX, mouseY);
-        renderHudButtons(event.getGuiGraphics(), mc, mouseX, mouseY);   // ← new
+        renderHudButtons(event.getGuiGraphics(), mc, mouseX, mouseY, bounds[0], bounds[1], bounds[2], bounds[3]);
         renderChangeCounter(event.getGuiGraphics(), mc, previewBE, mouseX, mouseY);
 
         // Tooltip for item icons
@@ -288,24 +289,61 @@ public class PreviewHudOverlay {
     private static boolean sliderDragging = false;
     private static float sliderValue = -1f; // -1 means "uninitialized, read from world"
 
-    private static void renderHudButtons(GuiGraphics guiGraphics, Minecraft mc, int mouseX, int mouseY) {
-        int screenW = mc.getWindow().getGuiScaledWidth();
-        int screenH = mc.getWindow().getGuiScaledHeight();
-        int margin = 6;
+    private static int[] getScreenBounds(AbstractContainerScreen<?> screen) {
+        try {
+            java.lang.reflect.Field leftField = AbstractContainerScreen.class.getDeclaredField("leftPos");
+            java.lang.reflect.Field topField = AbstractContainerScreen.class.getDeclaredField("topPos");
+            java.lang.reflect.Field wField = AbstractContainerScreen.class.getDeclaredField("imageWidth");
+            java.lang.reflect.Field hField = AbstractContainerScreen.class.getDeclaredField("imageHeight");
+            leftField.setAccessible(true);
+            topField.setAccessible(true);
+            wField.setAccessible(true);
+            hField.setAccessible(true);
+            return new int[]{leftField.getInt(screen), topField.getInt(screen), wField.getInt(screen), hField.getInt(screen)};
+        } catch (Exception e) {
+            return new int[]{0, 0, 176, 166}; // fallback: vanilla inventory size
+        }
+    }
+
+    private static int changeCounterBarX, changeCounterBarY, changeCounterBarW, changeCounterBarH;
+
+
+    private static void renderHudButtons(GuiGraphics guiGraphics, Minecraft mc, int mouseX, int mouseY,
+                                         int guiLeft, int guiTop, int guiWidth, int guiHeight) {
+        int margin = 30;
         int btnGap = 3;
 
         hudBtnExitW = 94; hudBtnExitH = 20;
         sliderW = 94; sliderH = 20;
-
-        hudBtnExitX = screenW - hudBtnExitW - margin;
-        hudBtnExitY = screenH - hudBtnExitH - margin;
-        sliderX = screenW - sliderW - margin;
-        sliderY = hudBtnExitY - sliderH - btnGap;
-        hudBtnHologramX = screenW - hudBtnHologramW - margin;
-        hudBtnHologramY = sliderY - hudBtnHologramH - btnGap;
+        hudBtnHologramW = 20; hudBtnHologramH = 20;
         hudBtnClearW = 20; hudBtnClearH = 20;
-        hudBtnClearX = hudBtnHologramX - hudBtnClearW - btnGap;
-        hudBtnClearY = hudBtnHologramY;
+
+        // --- Top row: Exit + time slider, sitting above the menu ---
+        // --- Top row: hologram toggle, clear, change counter, sitting above the menu ---
+        int counterBarW = 94;
+        int topRowWidth = hudBtnHologramW + btnGap + hudBtnClearW + btnGap + counterBarW;
+        int topRowStartX = guiLeft + (guiWidth - topRowWidth) / 2;
+        int topRowY = guiTop - margin - hudBtnHologramH;
+
+        hudBtnHologramX = topRowStartX;
+        hudBtnHologramY = topRowY;
+        hudBtnClearX = hudBtnHologramX + hudBtnHologramW + btnGap;
+        hudBtnClearY = topRowY;
+
+        changeCounterBarX = hudBtnClearX + hudBtnClearW + btnGap;
+        changeCounterBarY = topRowY;
+        changeCounterBarW = counterBarW;
+        changeCounterBarH = hudBtnClearH;
+
+        // --- Bottom row: Exit + time slider, sitting below the menu ---
+        int bottomRowWidth = hudBtnExitW + btnGap + sliderW;
+        int bottomRowStartX = guiLeft + (guiWidth - bottomRowWidth) / 2;
+        int bottomRowY = guiTop + guiHeight + margin - 2;
+
+        hudBtnExitX = bottomRowStartX;
+        hudBtnExitY = bottomRowY;
+        sliderX = hudBtnExitX + hudBtnExitW + btnGap;
+        sliderY = bottomRowY;
 
         hudBtnExitHovered = mouseX >= hudBtnExitX && mouseX < hudBtnExitX + hudBtnExitW
                 && mouseY >= hudBtnExitY && mouseY < hudBtnExitY + hudBtnExitH;
@@ -389,11 +427,10 @@ public class PreviewHudOverlay {
         int shownPlaced = Math.round(displayedPlaced);
         int shownBroken = Math.round(displayedBroken);
 
-        int gap = 3;
-        int barX = hudBtnExitX;
-        int barY = hudBtnClearY;
-        int barW = hudBtnExitW - hudBtnHologramW - hudBtnClearW - gap * 2;
-        int barH = hudBtnClearH;
+        int barX = changeCounterBarX;
+        int barY = changeCounterBarY;
+        int barW = changeCounterBarW;
+        int barH = changeCounterBarH;
 
 // Intensity driven by the live animated values, so the color ramps up
         // in step with the count-up animation rather than jumping instantly.
@@ -478,11 +515,6 @@ public class PreviewHudOverlay {
             sliderDragging = false;
         }
 
-// Set target alpha based on drag state
-        float targetAlpha = sliderDragging ? 0.15f : 1.0f;
-        inventoryAlpha += (targetAlpha - inventoryAlpha) * 0.2f; // smooth lerp
-        if (Math.abs(inventoryAlpha - targetAlpha) < 0.01f) inventoryAlpha = targetAlpha;
-
         // After drawing the slider track blits, before drawing the handle:
         boolean sliderHovered = mouseX >= sliderX && mouseX < sliderX + sliderW
                 && mouseY >= sliderY && mouseY < sliderY + sliderH;
@@ -496,6 +528,12 @@ public class PreviewHudOverlay {
                 sliderValue = Math.max(0f, Math.min(1f, sliderValue));
             }
         }
+
+// Set target alpha based on drag state — computed AFTER sliderDragging is
+// updated above, so it reflects this frame's actual drag state immediately.
+        float targetAlpha = sliderDragging ? 0.15f : 1.0f;
+        inventoryAlpha += (targetAlpha - inventoryAlpha) * 0.2f; // smooth lerp
+        if (Math.abs(inventoryAlpha - targetAlpha) < 0.01f) inventoryAlpha = targetAlpha;
 
 
 
@@ -731,7 +769,83 @@ public class PreviewHudOverlay {
         }
     }
 
-    @SubscribeEvent
+    private static int captureTextureId = -1;
+    private static int captureTexWidth = -1;
+    private static int captureTexHeight = -1;
+
+    private static void ensureCaptureTexture(int width, int height) {
+        if (captureTextureId != -1 && captureTexWidth == width && captureTexHeight == height) return;
+        if (captureTextureId != -1) {
+            org.lwjgl.opengl.GL11.glDeleteTextures(captureTextureId);
+        }
+        captureTextureId = org.lwjgl.opengl.GL11.glGenTextures();
+        org.lwjgl.opengl.GL11.glBindTexture(org.lwjgl.opengl.GL11.GL_TEXTURE_2D, captureTextureId);
+        org.lwjgl.opengl.GL11.glTexParameteri(org.lwjgl.opengl.GL11.GL_TEXTURE_2D, org.lwjgl.opengl.GL11.GL_TEXTURE_MIN_FILTER, org.lwjgl.opengl.GL11.GL_LINEAR);
+        org.lwjgl.opengl.GL11.glTexParameteri(org.lwjgl.opengl.GL11.GL_TEXTURE_2D, org.lwjgl.opengl.GL11.GL_TEXTURE_MAG_FILTER, org.lwjgl.opengl.GL11.GL_LINEAR);
+        org.lwjgl.opengl.GL11.glTexImage2D(org.lwjgl.opengl.GL11.GL_TEXTURE_2D, 0, org.lwjgl.opengl.GL11.GL_RGBA,
+                width, height, 0, org.lwjgl.opengl.GL11.GL_RGBA, org.lwjgl.opengl.GL11.GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
+        captureTexWidth = width;
+        captureTexHeight = height;
+    }
+
+    // Snapshots the currently-rendered frame (the 3D world, drawn just before this
+// screen starts drawing) into our own texture. Nothing else can interfere with
+// this later, since it's a plain copy, not a shared/global render state.
+    private static void captureBackground(Minecraft mc) {
+        int fbWidth = mc.getMainRenderTarget().width;
+        int fbHeight = mc.getMainRenderTarget().height;
+        ensureCaptureTexture(fbWidth, fbHeight);
+        org.lwjgl.opengl.GL11.glBindTexture(org.lwjgl.opengl.GL11.GL_TEXTURE_2D, captureTextureId);
+        org.lwjgl.opengl.GL11.glCopyTexSubImage2D(org.lwjgl.opengl.GL11.GL_TEXTURE_2D, 0, 0, 0, 0, 0, fbWidth, fbHeight);
+    }
+
+    // Draws the captured snapshot back over the menu's own rectangle, blended at
+// the given alpha, AFTER the menu (and JEI, etc.) have already fully drawn.
+// This is what actually produces the "see-through" look.
+    private static void drawCapturedBackgroundOverlay(GuiGraphics guiGraphics, Minecraft mc,
+                                                      int guiLeft, int guiTop, int guiWidth, int guiHeight,
+                                                      float alpha) {
+        if (captureTextureId == -1) return;
+
+        double guiScale = mc.getWindow().getGuiScale();
+        int fbX = (int) Math.round(guiLeft * guiScale);
+        int fbY = (int) Math.round(guiTop * guiScale);
+        int fbW = (int) Math.round(guiWidth * guiScale);
+        int fbH = (int) Math.round(guiHeight * guiScale);
+
+        // Framebuffer texture origin is bottom-left; flip V so the sampled patch
+        // lines up with the same on-screen area we captured it from.
+        float u0 = fbX / (float) captureTexWidth;
+        float u1 = (fbX + fbW) / (float) captureTexWidth;
+        float v0 = 1.0f - (fbY + fbH) / (float) captureTexHeight;
+        float v1 = 1.0f - fbY / (float) captureTexHeight;
+
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0, 0, 450.0f); // draw above everything else this frame
+
+        RenderSystem.setShader(net.minecraft.client.renderer.GameRenderer::getPositionTexShader);
+        RenderSystem.setShaderTexture(0, captureTextureId);
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, alpha);
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+
+        org.joml.Matrix4f matrix = guiGraphics.pose().last().pose();
+        com.mojang.blaze3d.vertex.Tesselator tess = com.mojang.blaze3d.vertex.Tesselator.getInstance();
+        com.mojang.blaze3d.vertex.BufferBuilder buf = tess.getBuilder();
+        buf.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS, com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX);
+        buf.vertex(matrix, guiLeft, guiTop + guiHeight, 0).uv(u0, v0).endVertex();
+        buf.vertex(matrix, guiLeft + guiWidth, guiTop + guiHeight, 0).uv(u1, v0).endVertex();
+        buf.vertex(matrix, guiLeft + guiWidth, guiTop, 0).uv(u1, v1).endVertex();
+        buf.vertex(matrix, guiLeft, guiTop, 0).uv(u0, v1).endVertex();
+        tess.end();
+
+        RenderSystem.disableBlend();
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
+
+        guiGraphics.pose().popPose();
+    }
+
+    @SubscribeEvent(priority = net.minecraftforge.eventbus.api.EventPriority.HIGHEST)
     public static void onScreenRenderPre(net.minecraftforge.client.event.ScreenEvent.Render.Pre event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || !PreviewManager.isInPreview(mc.player.getUUID())) return;
@@ -740,12 +854,11 @@ public class PreviewHudOverlay {
                 && !(containerScreen.getMenu() instanceof net.minecraft.world.inventory.InventoryMenu)) return;
 
         if (inventoryAlpha < 0.999f) {
-            RenderSystem.enableBlend();
-            RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, inventoryAlpha);
+            captureBackground(mc); // grab the 3D world before anything draws over it this frame
         }
     }
 
-    @SubscribeEvent
+    @SubscribeEvent(priority = net.minecraftforge.eventbus.api.EventPriority.LOWEST)
     public static void onScreenRenderPost(net.minecraftforge.client.event.ScreenEvent.Render.Post event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || !PreviewManager.isInPreview(mc.player.getUUID())) return;
@@ -753,9 +866,12 @@ public class PreviewHudOverlay {
         if (!(containerScreen instanceof net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen)
                 && !(containerScreen.getMenu() instanceof net.minecraft.world.inventory.InventoryMenu)) return;
 
-        // Always restore full color after the screen finishes rendering
-        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
-        RenderSystem.disableBlend();
+        if (inventoryAlpha < 0.999f) {
+            int screenW = mc.getWindow().getGuiScaledWidth();
+            int screenH = mc.getWindow().getGuiScaledHeight();
+            drawCapturedBackgroundOverlay(event.getGuiGraphics(), mc,
+                    0, 0, screenW, screenH, 1.0f - inventoryAlpha);
+        }
     }
 
     @SubscribeEvent

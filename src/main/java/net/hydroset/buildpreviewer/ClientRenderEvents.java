@@ -57,7 +57,7 @@ public class ClientRenderEvents {
 
         // Expand outward for the shell. Captured now so both the pre-pass
         // and the final shell draw use the exact same expanded matrix.
-        float expand = 0.06f;
+        float expand = 0.07f;
         poseStack.translate(0.5, 0.5, 0.5);
         poseStack.scale(1.0f + expand, 1.0f + expand, 1.0f + expand);
         poseStack.translate(-0.5, -0.5, -0.5);
