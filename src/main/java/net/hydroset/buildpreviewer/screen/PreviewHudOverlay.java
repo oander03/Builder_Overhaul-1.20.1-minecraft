@@ -234,53 +234,7 @@ public class PreviewHudOverlay {
         guiGraphics.pose().popPose();
     }
 
-    @SubscribeEvent
-    public static void onScreenRender(net.minecraftforge.client.event.ScreenEvent.Render.Post event) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.level == null) return;
-        if (!PreviewManager.isInPreview(mc.player.getUUID())) {
-            if (!cachedItemList.isEmpty()) resetCache();
-            return;
-        }
-        if (!(event.getScreen() instanceof AbstractContainerScreen containerScreen)) return;
-        if (!(containerScreen instanceof net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen)
-                && !(containerScreen.getMenu() instanceof net.minecraft.world.inventory.InventoryMenu)) return;
 
-        BlockPos anchor = PreviewManager.getAnchorPos(mc.player.getUUID());
-        if (anchor == null) return;
-
-        BlockEntity be = mc.level.getBlockEntity(anchor);
-        if (!(be instanceof PreviewBlockEntity previewBE)) return;
-
-        int mouseX = (int)(mc.mouseHandler.xpos() * mc.getWindow().getGuiScaledWidth() / mc.getWindow().getScreenWidth());
-        int mouseY = (int)(mc.mouseHandler.ypos() * mc.getWindow().getGuiScaledHeight() / mc.getWindow().getScreenHeight());
-
-        int[] bounds = getScreenBounds(containerScreen);
-        renderHud(event.getGuiGraphics(), mc, previewBE, mouseX, mouseY);
-        renderHudButtons(event.getGuiGraphics(), mc, mouseX, mouseY, bounds[0], bounds[1], bounds[2], bounds[3]);
-        renderChangeCounter(event.getGuiGraphics(), mc, previewBE, mouseX, mouseY);
-
-        // Tooltip for item icons
-        if (cachedItemList.isEmpty()) return;
-        int screenHeight = mc.getWindow().getGuiScaledHeight();
-        int slotSize = 16;
-        int rowHeight = slotSize + 2;
-        int padding = 2;
-        int columnWidth = slotSize + padding;
-        int maxRows = (screenHeight - padding * 2) / rowHeight;
-
-        for (int i = 0; i < cachedItemList.size(); i++) {
-            int col = i / maxRows;
-            int row = i % maxRows;
-            int iconX = padding + col * columnWidth;
-            int iconY = padding + row * rowHeight;
-
-            if (mouseX >= iconX && mouseX < iconX + slotSize && mouseY >= iconY && mouseY < iconY + slotSize) {
-                event.getGuiGraphics().renderTooltip(mc.font, cachedStacks[i], mouseX, mouseY);
-                break;
-            }
-        }
-    }
 
     private static float inventoryAlpha = 1.0f;
 
@@ -684,6 +638,8 @@ public class PreviewHudOverlay {
         guiGraphics.pose().popPose();
     }
 
+    private static final int ITEM_LIST_BOTTOM_MARGIN = 24; // keeps icons clear of JEI's bottom-left buttons
+
     private static void renderHud(GuiGraphics guiGraphics, Minecraft mc, PreviewBlockEntity previewBE, int mouseX, int mouseY) {
         Map<Item, Integer> requiredItems = previewBE.getRequiredItems();
         if (requiredItems == null || requiredItems.isEmpty()) return;
@@ -696,7 +652,7 @@ public class PreviewHudOverlay {
         int rowHeight = slotSize + 2;
         int padding = 2;
         int columnWidth = slotSize + padding;
-        int maxRows = (screenHeight - padding * 2) / rowHeight;
+        int maxRows = (screenHeight - padding * 2 - ITEM_LIST_BOTTOM_MARGIN) / rowHeight;
 
         boolean inventoryOpen = mc.screen instanceof AbstractContainerScreen;
 
@@ -861,16 +817,58 @@ public class PreviewHudOverlay {
     @SubscribeEvent(priority = net.minecraftforge.eventbus.api.EventPriority.LOWEST)
     public static void onScreenRenderPost(net.minecraftforge.client.event.ScreenEvent.Render.Post event) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || !PreviewManager.isInPreview(mc.player.getUUID())) return;
+        if (mc.player == null || mc.level == null) return;
+        if (!PreviewManager.isInPreview(mc.player.getUUID())) {
+            if (!cachedItemList.isEmpty()) resetCache();
+            return;
+        }
         if (!(event.getScreen() instanceof AbstractContainerScreen containerScreen)) return;
         if (!(containerScreen instanceof net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen)
                 && !(containerScreen.getMenu() instanceof net.minecraft.world.inventory.InventoryMenu)) return;
 
+        BlockPos anchor = PreviewManager.getAnchorPos(mc.player.getUUID());
+        if (anchor == null) return;
+
+        BlockEntity be = mc.level.getBlockEntity(anchor);
+        if (!(be instanceof PreviewBlockEntity previewBE)) return;
+
+        int mouseX = (int)(mc.mouseHandler.xpos() * mc.getWindow().getGuiScaledWidth() / mc.getWindow().getScreenWidth());
+        int mouseY = (int)(mc.mouseHandler.ypos() * mc.getWindow().getGuiScaledHeight() / mc.getWindow().getScreenHeight());
+
+        int[] bounds = getScreenBounds(containerScreen);
+
+
+        // Step 2: draw our own HUD on top of the mask.
+        renderHud(event.getGuiGraphics(), mc, previewBE, mouseX, mouseY);
+        renderHudButtons(event.getGuiGraphics(), mc, mouseX, mouseY, bounds[0], bounds[1], bounds[2], bounds[3]);
+        renderChangeCounter(event.getGuiGraphics(), mc, previewBE, mouseX, mouseY);
+
+        if (!cachedItemList.isEmpty()) {
+            int screenHeight = mc.getWindow().getGuiScaledHeight();
+            int slotSize = 16;
+            int rowHeight = slotSize + 2;
+            int padding = 2;
+            int columnWidth = slotSize + padding;
+            int maxRows = (screenHeight - padding * 2 - ITEM_LIST_BOTTOM_MARGIN) / rowHeight;
+
+            for (int i = 0; i < cachedItemList.size(); i++) {
+                int col = i / maxRows;
+                int row = i % maxRows;
+                int iconX = padding + col * columnWidth;
+                int iconY = padding + row * rowHeight;
+
+                if (mouseX >= iconX && mouseX < iconX + slotSize && mouseY >= iconY && mouseY < iconY + slotSize) {
+                    event.getGuiGraphics().renderTooltip(mc.font, cachedStacks[i], mouseX, mouseY);
+                    break;
+                }
+            }
+        }
+
+        // Step 3: time-slider transparency fade, drawn last so it fades everything above too.
         if (inventoryAlpha < 0.999f) {
             int screenW = mc.getWindow().getGuiScaledWidth();
             int screenH = mc.getWindow().getGuiScaledHeight();
-            drawCapturedBackgroundOverlay(event.getGuiGraphics(), mc,
-                    0, 0, screenW, screenH, 1.0f - inventoryAlpha);
+            drawCapturedBackgroundOverlay(event.getGuiGraphics(), mc, 0, 0, screenW, screenH, 1.0f - inventoryAlpha);
         }
     }
 
@@ -933,7 +931,7 @@ public class PreviewHudOverlay {
         int rowHeight = slotSize + 2;
         int padding = 2;
         int columnWidth = slotSize + padding;
-        int maxRows = (screenHeight - padding * 2) / rowHeight;
+        int maxRows = (screenHeight - padding * 2 - ITEM_LIST_BOTTOM_MARGIN) / rowHeight;
 
         for (int i = 0; i < cachedItemList.size(); i++) {
             int col = i / maxRows;

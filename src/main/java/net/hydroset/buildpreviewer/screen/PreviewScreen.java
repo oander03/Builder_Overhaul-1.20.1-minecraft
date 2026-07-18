@@ -117,6 +117,13 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     private int animTargetBroken = Integer.MIN_VALUE;
     private long animStartTimePB = 0L;
 
+    private static final int SCROLLBAR_X_OFFSET = 169; // 3px left of the old 172
+    private static final int SCROLLBAR_Y_OFFSET = 40;
+    private static final int SCROLLBAR_TRACK_HEIGHT = 54;
+    private static final int SCROLLBAR_HANDLE_WIDTH = 6;
+    private static final int SCROLLBAR_HANDLE_HEIGHT = 27;
+    private static final int SCROLLBAR_HIT_PADDING_X = 3; // extra grab room on each side
+
     private int counterBarX, counterBarY, counterBarW, counterBarH;
 
     private static float easeOutCubic(float t) {
@@ -250,12 +257,12 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        int x = this.leftPos;
-        int y = this.topPos;
+        int scrollBarX = this.leftPos + SCROLLBAR_X_OFFSET;
+        int scrollBarYTop = this.topPos + SCROLLBAR_Y_OFFSET;
 
-        // Check if mouse is within the scroll bar column
-        if (mouseX >= x + 174 && mouseX <= x + 174 + 12) {
-            if (mouseY >= y + 18 && mouseY <= y + 18 + 54) {
+        if (mouseX >= scrollBarX - SCROLLBAR_HIT_PADDING_X
+                && mouseX <= scrollBarX + SCROLLBAR_HANDLE_WIDTH + SCROLLBAR_HIT_PADDING_X) {
+            if (mouseY >= scrollBarYTop && mouseY <= scrollBarYTop + SCROLLBAR_TRACK_HEIGHT) {
                 this.isScrolling = true;
                 return true;
             }
@@ -273,13 +280,15 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
         if (this.isScrolling) {
-            int y = this.topPos + 18;
+            int scrollBarYTop = this.topPos + SCROLLBAR_Y_OFFSET;
             int totalItems = menu.getBlockEntity().getRequiredItems().size();
             int totalRows = (int) Math.ceil(totalItems / 9.0);
             int maxScroll = Math.max(0, totalRows - 3);
 
-            float scrollProgress = ((float)mouseY - y - 7.5F) / (54.0F - 15.0F);
-            int newOffset = (int)((scrollProgress * maxScroll) + 0.5);
+            float scrollProgress = ((float) mouseY - scrollBarYTop - (SCROLLBAR_HANDLE_HEIGHT / 2f))
+                    / (SCROLLBAR_TRACK_HEIGHT - SCROLLBAR_HANDLE_HEIGHT);
+            int newOffset = Math.round(scrollProgress * maxScroll);
+            newOffset = Math.max(0, Math.min(maxScroll, newOffset)); // clamp — old code could overshoot past the ends
             menu.scrollTo(newOffset);
             return true;
         }
@@ -313,9 +322,9 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         guiGraphics.blit(activeTex, x, y, 0, 0, TEXTURE_RENDER_WIDTH, imageHeight);
         int maxScroll = needsScroll ? totalRows - 3 : 0;
 
-        int scrollBarX = x + 172;
-        int scrollBarYTop = y + 40;
-        int scrollBarHeight = 54;
+        int scrollBarX = x + SCROLLBAR_X_OFFSET;
+        int scrollBarYTop = y + SCROLLBAR_Y_OFFSET;
+        int scrollBarHeight = SCROLLBAR_TRACK_HEIGHT;
 
         // --- DEBUG: If you see a weird pink/black box, the path is wrong.
         // --- If you see nothing, the UV (176, 0) is pointing to a transparent pixel.
@@ -325,12 +334,13 @@ public class PreviewScreen extends AbstractContainerScreen<PreviewMenu> {
         int textureHeight = 256;
 
 // The dimensions of the scroll handle itself in the PNG
-        int handleWidth = 6;
-        int handleHeight = 27; // Increased to match your crop
+        int handleWidth = SCROLLBAR_HANDLE_WIDTH;
+        int handleHeight = SCROLLBAR_HANDLE_HEIGHT;
 
         if (needsScroll) {
             float scrollFraction = menu.smoothScrollOffset / maxScroll;
-            int handleY = scrollBarYTop + (int) (scrollFraction * (scrollBarHeight - handleHeight));
+            int travelRange = (scrollBarHeight - handleHeight) - (2);
+            int handleY = scrollBarYTop + 1 + (int) (scrollFraction * travelRange);
             guiGraphics.blit(SCROLLER_TEXTURE, scrollBarX, handleY, 0.0F, 199.0F, handleWidth, handleHeight, textureWidth, textureHeight);
         } else {
             guiGraphics.blit(SCROLLER_TEXTURE, scrollBarX, scrollBarYTop, 12.0F, 199.0F, handleWidth, handleHeight, textureWidth, textureHeight);
