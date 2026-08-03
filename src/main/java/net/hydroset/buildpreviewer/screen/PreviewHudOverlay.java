@@ -267,44 +267,48 @@ public class PreviewHudOverlay {
         int margin = 30;
         int btnGap = 3;
 
+
         hudBtnExitW = 94; hudBtnExitH = 20;
         sliderW = 94; sliderH = 20;
         hudBtnHologramW = 20; hudBtnHologramH = 20;
         hudBtnClearW = 20; hudBtnClearH = 20;
 
-        // --- Top row: Exit + time slider, sitting above the menu ---
-        // --- Top row: hologram toggle, clear, change counter, sitting above the menu ---
-        int counterBarW = 94;
-        int topRowWidth = hudBtnHologramW + btnGap + hudBtnClearW + btnGap + counterBarW;
-        int topRowStartX = guiLeft + (guiWidth - topRowWidth) / 2;
-        int topRowY = guiTop - margin - hudBtnHologramH;
+        int counterBarW = 56;
+        int counterBarH = 20;
 
-        hudBtnHologramX = topRowStartX;
-        hudBtnHologramY = topRowY;
-        hudBtnClearX = hudBtnHologramX + hudBtnHologramW + btnGap;
-        hudBtnClearY = topRowY;
-
-        changeCounterBarX = hudBtnClearX + hudBtnClearW + btnGap;
-        changeCounterBarY = topRowY;
-        changeCounterBarW = counterBarW;
-        changeCounterBarH = hudBtnClearH;
-
-        // --- Bottom row: Exit + time slider, sitting below the menu ---
-        int bottomRowWidth = hudBtnExitW + btnGap + sliderW;
-        int bottomRowStartX = guiLeft + (guiWidth - bottomRowWidth) / 2;
         int bottomRowY = guiTop + guiHeight + margin - 2;
 
-        hudBtnExitX = bottomRowStartX;
+        // --- Centered group: Exit Builder + slider, centered under the menu (unchanged) ---
+        int centerGroupWidth = hudBtnExitW + btnGap + sliderW;
+        int centerGroupStartX = guiLeft + (guiWidth - centerGroupWidth) / 2;
+
+        hudBtnExitX = centerGroupStartX;
         hudBtnExitY = bottomRowY;
+
         sliderX = hudBtnExitX + hudBtnExitW + btnGap;
         sliderY = bottomRowY;
+
+        // --- Left side: hologram + clear, sitting a margin to the LEFT of the
+        // centered group's left edge — not anchored to the screen edge. ---
+        hudBtnClearX = hudBtnExitX - btnGap - hudBtnClearW;
+        hudBtnClearY = bottomRowY;
+
+        hudBtnHologramX = hudBtnClearX - btnGap - hudBtnHologramW;
+        hudBtnHologramY = bottomRowY;
+
+        // --- Right side: counter, sitting a margin to the RIGHT of the
+        // centered group's right edge — not anchored to the screen edge. ---
+        int centerGroupRightEdge = sliderX + sliderW;
+        changeCounterBarX = centerGroupRightEdge + btnGap;
+        changeCounterBarY = bottomRowY;
+        changeCounterBarW = counterBarW;
+        changeCounterBarH = counterBarH;
 
         hudBtnExitHovered = mouseX >= hudBtnExitX && mouseX < hudBtnExitX + hudBtnExitW
                 && mouseY >= hudBtnExitY && mouseY < hudBtnExitY + hudBtnExitH;
 
         hudBtnHologramHovered = mouseX >= hudBtnHologramX && mouseX < hudBtnHologramX + hudBtnHologramW
                 && mouseY >= hudBtnHologramY && mouseY < hudBtnHologramY + hudBtnHologramH;
-
 
         hudBtnClearHovered = mouseX >= hudBtnClearX && mouseX < hudBtnClearX + hudBtnClearW
                 && mouseY >= hudBtnClearY && mouseY < hudBtnClearY + hudBtnClearH;
@@ -317,7 +321,6 @@ public class PreviewHudOverlay {
         drawVanillaButton(guiGraphics, mc, hudBtnExitX, hudBtnExitY, hudBtnExitW, hudBtnExitH,
                 "⛏ Exit Builder", hudBtnExitHovered);
 
-// Replace the drawVanillaButton call for the hologram button:
         boolean hologramsOn = HologramRenderer.isHologramsEnabled();
         drawVanillaButton(guiGraphics, mc, hudBtnHologramX, hudBtnHologramY, hudBtnHologramW, hudBtnHologramH,
                 hologramsOn ? "◆" : "◇", hudBtnHologramHovered);
