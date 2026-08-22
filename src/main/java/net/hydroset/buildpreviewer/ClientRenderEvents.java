@@ -79,14 +79,8 @@ public class ClientRenderEvents {
         poseStack.pushPose();
         poseStack.translate(anchorPos.getX() - camX, anchorPos.getY() - camY, anchorPos.getZ() - camZ);
 
-        // True, unexpanded cube matrix — captured BEFORE the expand scale.
-        Matrix4f trueMatrix = new Matrix4f(poseStack.last().pose());
-
-        float expand = 0.07f;
-        poseStack.translate(0.5, 0.5, 0.5);
-        poseStack.scale(1.0f + expand, 1.0f + expand, 1.0f + expand);
-        poseStack.translate(-0.5, -0.5, -0.5);
-        Matrix4f matrix = poseStack.last().pose();
+        Matrix4f matrix = new Matrix4f(poseStack.last().pose());
+        float expand = 0.04f;
 
         boolean skipDown  = outlinedPositions.contains(anchorPos.below());
         boolean skipUp    = outlinedPositions.contains(anchorPos.above());
@@ -103,41 +97,26 @@ public class ClientRenderEvents {
         RenderSystem.depthMask(true);
         RenderSystem.colorMask(false, false, false, false);
 
-        // --- Depth pre-pass, layer 1 --- force-write the expanded cube's depth,
-        // ignoring whatever's already there (terrain, walls) — this is what
-        // makes the rim visible through the ground/walls.
         RenderSystem.depthFunc(GL11.GL_ALWAYS);
         Tesselator tess1 = Tesselator.getInstance();
         BufferBuilder buf1 = tess1.getBuilder();
         buf1.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-        if (!skipDown)  drawFaceDown(matrix, buf1, 1, 1, 1, 1);
-        if (!skipUp)    drawFaceUp(matrix, buf1, 1, 1, 1, 1);
-        if (!skipNorth) drawFaceNorth(matrix, buf1, 1, 1, 1, 1);
-        if (!skipSouth) drawFaceSouth(matrix, buf1, 1, 1, 1, 1);
-        if (!skipWest)  drawFaceWest(matrix, buf1, 1, 1, 1, 1);
-        if (!skipEast)  drawFaceEast(matrix, buf1, 1, 1, 1, 1);
+        drawFaces(matrix, buf1, 1, 1, 1, 1, expand, anchorPos, outlinedPositions,
+                skipDown, skipUp, skipNorth, skipSouth, skipWest, skipEast);
         tess1.end();
         RenderSystem.disableCull();
 
-        // --- Depth pre-pass, layer 2 --- carve out the block's own true footprint
-        // by writing the TRUE (unexpanded) cube's depth back on top wherever it's
-        // nearer, leaving only the thin rim sliver from layer 1.
         RenderSystem.depthFunc(GL11.GL_LESS);
         Tesselator tess2 = Tesselator.getInstance();
         BufferBuilder buf2 = tess2.getBuilder();
         buf2.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-        if (!skipDown)  drawFaceDown(trueMatrix, buf2, 1, 1, 1, 1);
-        if (!skipUp)    drawFaceUp(trueMatrix, buf2, 1, 1, 1, 1);
-        if (!skipNorth) drawFaceNorth(trueMatrix, buf2, 1, 1, 1, 1);
-        if (!skipSouth) drawFaceSouth(trueMatrix, buf2, 1, 1, 1, 1);
-        if (!skipWest)  drawFaceWest(trueMatrix, buf2, 1, 1, 1, 1);
-        if (!skipEast)  drawFaceEast(trueMatrix, buf2, 1, 1, 1, 1);
+        drawFaces(matrix, buf2, 1, 1, 1, 1, 0f, anchorPos, outlinedPositions,
+                skipDown, skipUp, skipNorth, skipSouth, skipWest, skipEast);
         tess2.end();
 
         RenderSystem.depthFunc(GL11.GL_LEQUAL);
         RenderSystem.colorMask(true, true, true, true);
 
-        // --- Draw the shell ---
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.depthMask(false);
@@ -151,14 +130,8 @@ public class ClientRenderEvents {
         Tesselator tesselator = Tesselator.getInstance();
         BufferBuilder buffer = tesselator.getBuilder();
         buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-
-        if (!skipDown)  drawFaceDown(matrix, buffer, r, g, b, a);
-        if (!skipUp)    drawFaceUp(matrix, buffer, r, g, b, a);
-        if (!skipNorth) drawFaceNorth(matrix, buffer, r, g, b, a);
-        if (!skipSouth) drawFaceSouth(matrix, buffer, r, g, b, a);
-        if (!skipWest)  drawFaceWest(matrix, buffer, r, g, b, a);
-        if (!skipEast)  drawFaceEast(matrix, buffer, r, g, b, a);
-
+        drawFaces(matrix, buffer, r, g, b, a, expand, anchorPos, outlinedPositions,
+                skipDown, skipUp, skipNorth, skipSouth, skipWest, skipEast);
         tesselator.end();
         RenderSystem.disablePolygonOffset();
 
@@ -170,46 +143,118 @@ public class ClientRenderEvents {
         poseStack.popPose();
     }
 
-    private static void drawFaceDown(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
-        buffer.vertex(matrix, 0, 0, 0).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 1, 0, 0).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 1, 0, 1).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 0, 0, 1).color(r, g, b, a).endVertex();
+    private static void drawFaces(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a,
+                                  float expand, BlockPos anchorPos, java.util.Set<BlockPos> outlined,
+                                  boolean skipDown, boolean skipUp, boolean skipNorth,
+                                  boolean skipSouth, boolean skipWest, boolean skipEast) {
+        if (!skipDown)  drawFaceDown(matrix, buffer, r, g, b, a, expand, anchorPos, outlined);
+        if (!skipUp)    drawFaceUp(matrix, buffer, r, g, b, a, expand, anchorPos, outlined);
+        if (!skipNorth) drawFaceNorth(matrix, buffer, r, g, b, a, expand, anchorPos, outlined);
+        if (!skipSouth) drawFaceSouth(matrix, buffer, r, g, b, a, expand, anchorPos, outlined);
+        if (!skipWest)  drawFaceWest(matrix, buffer, r, g, b, a, expand, anchorPos, outlined);
+        if (!skipEast)  drawFaceEast(matrix, buffer, r, g, b, a, expand, anchorPos, outlined);
     }
 
-    private static void drawFaceUp(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
-        buffer.vertex(matrix, 0, 1, 0).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 0, 1, 1).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 1, 1, 1).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 1, 1, 0).color(r, g, b, a).endVertex();
+    // True if a cluster block sits at anchorPos + (dx,dy,dz).
+    private static boolean has(java.util.Set<BlockPos> set, BlockPos base, int dx, int dy, int dz) {
+        return set.contains(base.offset(dx, dy, dz));
     }
 
-    private static void drawFaceNorth(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
-        buffer.vertex(matrix, 0, 0, 0).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 0, 1, 0).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 1, 1, 0).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 1, 0, 0).color(r, g, b, a).endVertex();
+    private static void drawFaceDown(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a,
+                                     float expand, BlockPos pos, java.util.Set<BlockPos> outlined) {
+        // Clamp if there's a same-level neighbor OR a diagonal (step) neighbor below-and-over.
+        boolean clampWest  = has(outlined, pos, -1, 0, 0) || has(outlined, pos, -1, -1, 0);
+        boolean clampEast  = has(outlined, pos,  1, 0, 0) || has(outlined, pos,  1, -1, 0);
+        boolean clampNorth = has(outlined, pos, 0, 0, -1) || has(outlined, pos, 0, -1, -1);
+        boolean clampSouth = has(outlined, pos, 0, 0,  1) || has(outlined, pos, 0, -1,  1);
+
+        float y = -expand;
+        float xMin = clampWest ? 0f : -expand, xMax = clampEast ? 1f : 1f + expand;
+        float zMin = clampNorth ? 0f : -expand, zMax = clampSouth ? 1f : 1f + expand;
+        buffer.vertex(matrix, xMin, y, zMin).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMax, y, zMin).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMax, y, zMax).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMin, y, zMax).color(r, g, b, a).endVertex();
     }
 
-    private static void drawFaceSouth(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
-        buffer.vertex(matrix, 0, 0, 1).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 1, 0, 1).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 1, 1, 1).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 0, 1, 1).color(r, g, b, a).endVertex();
+    private static void drawFaceUp(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a,
+                                   float expand, BlockPos pos, java.util.Set<BlockPos> outlined) {
+        boolean clampWest  = has(outlined, pos, -1, 0, 0) || has(outlined, pos, -1, 1, 0);
+        boolean clampEast  = has(outlined, pos,  1, 0, 0) || has(outlined, pos,  1, 1, 0);
+        boolean clampNorth = has(outlined, pos, 0, 0, -1) || has(outlined, pos, 0, 1, -1);
+        boolean clampSouth = has(outlined, pos, 0, 0,  1) || has(outlined, pos, 0, 1,  1);
+
+        float y = 1f + expand;
+        float xMin = clampWest ? 0f : -expand, xMax = clampEast ? 1f : 1f + expand;
+        float zMin = clampNorth ? 0f : -expand, zMax = clampSouth ? 1f : 1f + expand;
+        buffer.vertex(matrix, xMin, y, zMin).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMin, y, zMax).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMax, y, zMax).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMax, y, zMin).color(r, g, b, a).endVertex();
     }
 
-    private static void drawFaceWest(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
-        buffer.vertex(matrix, 0, 0, 0).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 0, 0, 1).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 0, 1, 1).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 0, 1, 0).color(r, g, b, a).endVertex();
+    private static void drawFaceNorth(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a,
+                                      float expand, BlockPos pos, java.util.Set<BlockPos> outlined) {
+        boolean clampWest  = has(outlined, pos, -1, 0, 0) || has(outlined, pos, -1, 0, -1);
+        boolean clampEast  = has(outlined, pos,  1, 0, 0) || has(outlined, pos,  1, 0, -1);
+        boolean clampBelow = has(outlined, pos, 0, -1, 0) || has(outlined, pos, 0, -1, -1);
+        boolean clampAbove = has(outlined, pos, 0,  1, 0) || has(outlined, pos, 0,  1, -1);
+
+        float z = -expand;
+        float xMin = clampWest ? 0f : -expand, xMax = clampEast ? 1f : 1f + expand;
+        float yMin = clampBelow ? 0f : -expand, yMax = clampAbove ? 1f : 1f + expand;
+        buffer.vertex(matrix, xMin, yMin, z).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMin, yMax, z).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMax, yMax, z).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMax, yMin, z).color(r, g, b, a).endVertex();
     }
 
-    private static void drawFaceEast(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a) {
-        buffer.vertex(matrix, 1, 0, 0).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 1, 1, 0).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 1, 1, 1).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, 1, 0, 1).color(r, g, b, a).endVertex();
+    private static void drawFaceSouth(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a,
+                                      float expand, BlockPos pos, java.util.Set<BlockPos> outlined) {
+        boolean clampWest  = has(outlined, pos, -1, 0, 0) || has(outlined, pos, -1, 0, 1);
+        boolean clampEast  = has(outlined, pos,  1, 0, 0) || has(outlined, pos,  1, 0, 1);
+        boolean clampBelow = has(outlined, pos, 0, -1, 0) || has(outlined, pos, 0, -1, 1);
+        boolean clampAbove = has(outlined, pos, 0,  1, 0) || has(outlined, pos, 0,  1, 1);
+
+        float z = 1f + expand;
+        float xMin = clampWest ? 0f : -expand, xMax = clampEast ? 1f : 1f + expand;
+        float yMin = clampBelow ? 0f : -expand, yMax = clampAbove ? 1f : 1f + expand;
+        buffer.vertex(matrix, xMin, yMin, z).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMax, yMin, z).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMax, yMax, z).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, xMin, yMax, z).color(r, g, b, a).endVertex();
+    }
+
+    private static void drawFaceWest(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a,
+                                     float expand, BlockPos pos, java.util.Set<BlockPos> outlined) {
+        boolean clampNorth = has(outlined, pos, 0, 0, -1) || has(outlined, pos, -1, 0, -1);
+        boolean clampSouth = has(outlined, pos, 0, 0,  1) || has(outlined, pos, -1, 0,  1);
+        boolean clampBelow = has(outlined, pos, 0, -1, 0) || has(outlined, pos, -1, -1, 0);
+        boolean clampAbove = has(outlined, pos, 0,  1, 0) || has(outlined, pos, -1,  1, 0);
+
+        float x = -expand;
+        float zMin = clampNorth ? 0f : -expand, zMax = clampSouth ? 1f : 1f + expand;
+        float yMin = clampBelow ? 0f : -expand, yMax = clampAbove ? 1f : 1f + expand;
+        buffer.vertex(matrix, x, yMin, zMin).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x, yMin, zMax).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x, yMax, zMax).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x, yMax, zMin).color(r, g, b, a).endVertex();
+    }
+
+    private static void drawFaceEast(Matrix4f matrix, VertexConsumer buffer, float r, float g, float b, float a,
+                                     float expand, BlockPos pos, java.util.Set<BlockPos> outlined) {
+        boolean clampNorth = has(outlined, pos, 0, 0, -1) || has(outlined, pos, 1, 0, -1);
+        boolean clampSouth = has(outlined, pos, 0, 0,  1) || has(outlined, pos, 1, 0,  1);
+        boolean clampBelow = has(outlined, pos, 0, -1, 0) || has(outlined, pos, 1, -1, 0);
+        boolean clampAbove = has(outlined, pos, 0,  1, 0) || has(outlined, pos, 1,  1, 0);
+
+        float x = 1f + expand;
+        float zMin = clampNorth ? 0f : -expand, zMax = clampSouth ? 1f : 1f + expand;
+        float yMin = clampBelow ? 0f : -expand, yMax = clampAbove ? 1f : 1f + expand;
+        buffer.vertex(matrix, x, yMin, zMin).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x, yMax, zMin).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x, yMax, zMax).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x, yMin, zMax).color(r, g, b, a).endVertex();
     }
 
 

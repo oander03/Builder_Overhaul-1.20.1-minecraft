@@ -5,6 +5,7 @@ import com.mojang.blaze3d.vertex.*;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.*;
 import net.minecraft.client.renderer.block.BlockRenderDispatcher;
+import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -80,6 +81,9 @@ public class HologramRenderer {
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.depthMask(true);
+        RenderSystem.disableDepthTest();   // ← new: stop clouds/weather/etc. from occluding via stale depth values
+        RenderSystem.depthFunc(GL11.GL_LEQUAL); // ← add: guarantee normal occlusion behavior, not left on ALWAYS/LESS from elsewhere
+
 
         GL11.glEnable(GL11.GL_POLYGON_OFFSET_FILL);
         GL11.glPolygonOffset(-2f, -2f);
@@ -99,10 +103,17 @@ public class HologramRenderer {
             } else {
                 r = BROKEN_R; g = BROKEN_G; b = BROKEN_B; a = BROKEN_A;
             }
-            
 
-            Set<Direction> allowedFaces = EnumSet.allOf(Direction.class);
 
+// Compute which faces are actually exposed
+// Compute which faces are actually exposed
+            Set<Direction> allowedFaces = EnumSet.noneOf(Direction.class);
+            for (Direction dir : Direction.values()) {
+                boolean hasHologramNeighbor = snapshot.containsKey(pos.relative(dir));
+                if (!hasHologramNeighbor) {
+                    allowedFaces.add(dir);
+                }
+            }
             poseStack.pushPose();
             poseStack.translate(pos.getX() - camX, pos.getY() - camY, pos.getZ() - camZ);
             poseStack.translate(0.5, 0.5, 0.5);
@@ -149,6 +160,7 @@ public class HologramRenderer {
         GL11.glDisable(GL11.GL_POLYGON_OFFSET_FILL);
         RenderSystem.enableCull();
         RenderSystem.depthMask(true);
+        RenderSystem.enableDepthTest();   // ← new: restore for everything rendered after you
         RenderSystem.disableBlend();
     }
 
@@ -200,6 +212,15 @@ public class HologramRenderer {
             this.allowedFaces = allowedFaces;
         }
 
+        @Override
+        public void putBulkData(PoseStack.Pose pose, BakedQuad quad, float[] colorMuls,
+                                float red, float green, float blue, float alpha,
+                                int[] lightmap, int overlay, boolean readExistingColor) {
+            if (!allowedFaces.contains(quad.getDirection())) return;
+            delegate.putBulkData(pose, quad, colorMuls, red * tr, green * tg, blue * tb, alpha * ta,
+                    lightmap, overlay, readExistingColor);
+        }
+
         @Override public VertexConsumer vertex(double x, double y, double z) {
             vx[vi][0]=(float)x; vx[vi][1]=(float)y; vx[vi][2]=(float)z; return this;
         }
@@ -215,14 +236,7 @@ public class HologramRenderer {
         @Override public void endVertex() { vi++; if (vi==QUAD_SIZE) { flushQuad(); vi=0; hasNormal=false; } }
 
         private void flushQuad() {
-            // Use e2×e1 instead of e1×e2 — Minecraft quads are wound CW from outside,
-            // so the standard cross product gives an inward normal. Swap to get outward.
-            float e1x=vx[1][0]-vx[0][0], e1y=vx[1][1]-vx[0][1], e1z=vx[1][2]-vx[0][2];
-            float e2x=vx[2][0]-vx[0][0], e2y=vx[2][1]-vx[0][1], e2z=vx[2][2]-vx[0][2];
-            float nx=e2y*e1z-e2z*e1y, ny=e2z*e1x-e2x*e1z, nz=e2x*e1y-e2y*e1x;
-            if (nx==0&&ny==0&&nz==0) return;
-
-            Direction facing = dirFromNormal(nx, ny, nz);
+            Direction facing = resolveFacing();
             if (facing == null) return;
             if (!allowedFaces.contains(facing)) return;
 
@@ -236,6 +250,20 @@ public class HologramRenderer {
                 if (hasNormal) delegate.normal(vN[i][0], vN[i][1], vN[i][2]);
                 delegate.endVertex();
             }
+        }
+
+        // Prefer the model's actual baked-and-transformed normal (authoritative).
+// Only fall back to a winding-based guess if this quad never called normal().
+        private Direction resolveFacing() {
+            if (hasNormal) {
+                Direction d = dirFromNormal(vN[0][0], vN[0][1], vN[0][2]);
+                if (d != null) return d;
+            }
+            float e1x=vx[1][0]-vx[0][0], e1y=vx[1][1]-vx[0][1], e1z=vx[1][2]-vx[0][2];
+            float e2x=vx[2][0]-vx[0][0], e2y=vx[2][1]-vx[0][1], e2z=vx[2][2]-vx[0][2];
+            float nx=e2y*e1z-e2z*e1y, ny=e2z*e1x-e2x*e1z, nz=e2x*e1y-e2y*e1x;
+            if (nx==0&&ny==0&&nz==0) return null;
+            return dirFromNormal(nx, ny, nz);
         }
 
         // Map the dominant axis of a normal to a Direction.
