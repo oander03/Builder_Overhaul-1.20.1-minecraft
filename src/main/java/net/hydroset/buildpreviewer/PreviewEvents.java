@@ -447,16 +447,17 @@ public class PreviewEvents {
             PreviewManager.recordChange(uuid, targetPos, currentState);
         }
     }
+
     @SubscribeEvent
     public static void onMultiBlockPlace(BlockEvent.EntityMultiPlaceEvent event) {
-        if (event.getEntity() instanceof Player player) {
-            UUID uuid = player.getUUID();
-            if (PreviewManager.isInPreview(uuid)) {
-                event.getReplacedBlockSnapshots().forEach(snapshot -> {
-                    PreviewManager.recordChange(uuid, snapshot.getPos(), snapshot.getReplacedBlock());
-                });
-            }
-        }
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        UUID uuid = player.getUUID();
+        if (!PreviewManager.isInPreview(uuid)) return;
+
+        event.getReplacedBlockSnapshots().forEach(snapshot -> {
+            PreviewManager.recordChange(uuid, snapshot.getPos(), snapshot.getReplacedBlock());
+            PreviewManager.recordAndSync(player, snapshot.getPos(), snapshot.getReplacedBlock(), null);
+        });
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
