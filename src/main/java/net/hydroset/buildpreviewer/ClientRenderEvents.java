@@ -123,6 +123,7 @@ public class ClientRenderEvents {
 
         RenderSystem.polygonOffset(-1.0f, -1.0f);
         RenderSystem.enablePolygonOffset();
+        // hi
 
         RenderSystem.enableCull();
         GL11.glCullFace(GL11.GL_FRONT);
