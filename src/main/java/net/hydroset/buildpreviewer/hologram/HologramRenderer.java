@@ -9,7 +9,11 @@ import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.hydroset.buildpreviewer.PreviewManager;
+import net.hydroset.buildpreviewer.block.ModBlocks;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -25,6 +29,22 @@ public class HologramRenderer {
     private static final float BROKEN_R = 1.00f, BROKEN_G = 0.50f, BROKEN_B = 0.50f, BROKEN_A = 0.25f;
     private static final float SCALE_PLACED = 1.000f;
     private static final float SCALE_BROKEN = 1.000f;
+    private static final RenderType HOLOGRAM_BLOCKS = RenderType.create(
+            "build_previewer_hologram_blocks",
+            DefaultVertexFormat.BLOCK,
+            VertexFormat.Mode.QUADS,
+            2_097_152,
+            true,
+            true,
+            RenderType.CompositeState.builder()
+                    .setShaderState(HologramRenderStateAccess.translucentShader())
+                    .setTextureState(HologramRenderStateAccess.blockTexture())
+                    .setTransparencyState(HologramRenderStateAccess.translucentTransparency())
+                    .setDepthTestState(HologramRenderStateAccess.noDepthTest())
+                    .setCullState(HologramRenderStateAccess.cull())
+                    .setLightmapState(HologramRenderStateAccess.lightmap())
+                    .setOverlayState(HologramRenderStateAccess.overlay())
+                    .createCompositeState(true));
 
     // Add this field near the top with the other statics
     private static volatile boolean hologramsEnabled = false;
@@ -51,11 +71,13 @@ public class HologramRenderer {
 
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) return;
 
-        Map<BlockPos, HologramSyncPacket.HologramEntry> snapshot = holograms;
-        if (snapshot.isEmpty()) return;
-
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null) return;
+
+        Map<BlockPos, HologramSyncPacket.HologramEntry> snapshot = holograms;
+        BlockPos anchorPos = PreviewManager.isInPreview(mc.player.getUUID())
+                ? PreviewManager.getAnchorPos(mc.player.getUUID()) : null;
+        if (snapshot.isEmpty() && anchorPos == null) return;
 
         PoseStack poseStack = event.getPoseStack();
         BlockRenderDispatcher brd = mc.getBlockRenderer();
@@ -80,7 +102,7 @@ public class HologramRenderer {
 
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
-        RenderSystem.depthMask(true);
+        RenderSystem.depthMask(false);
         RenderSystem.disableDepthTest();   // ← new: stop clouds/weather/etc. from occluding via stale depth values
         RenderSystem.depthFunc(GL11.GL_LEQUAL); // ← add: guarantee normal occlusion behavior, not left on ALWAYS/LESS from elsewhere
 
@@ -92,6 +114,8 @@ public class HologramRenderer {
 
         for (Map.Entry<BlockPos, HologramSyncPacket.HologramEntry> entry : entries) {
             BlockPos pos = entry.getKey();
+            if (!event.getFrustum().isVisible(new AABB(pos))) continue;
+
             HologramSyncPacket.HologramEntry hologram = entry.getValue();
 
             BlockState stateToRender = hologram.state();
@@ -105,12 +129,16 @@ public class HologramRenderer {
             }
 
 
-// Compute which faces are actually exposed
-// Compute which faces are actually exposed
             Set<Direction> allowedFaces = EnumSet.noneOf(Direction.class);
             for (Direction dir : Direction.values()) {
-                boolean hasHologramNeighbor = snapshot.containsKey(pos.relative(dir));
-                if (!hasHologramNeighbor) {
+                BlockPos neighborPos = pos.relative(dir);
+                HologramSyncPacket.HologramEntry neighbor = snapshot.get(neighborPos);
+                BlockState neighborState = neighbor == null ? null : neighbor.state();
+                boolean currentFaceIsFull = Block.isFaceFull(
+                        stateToRender.getOcclusionShape(mc.level, pos), dir);
+                boolean neighborFaceIsFull = neighborState != null && !neighborState.isAir()
+                        && Block.isFaceFull(neighborState.getOcclusionShape(mc.level, neighborPos), dir.getOpposite());
+                if (!currentFaceIsFull || !neighborFaceIsFull) {
                     allowedFaces.add(dir);
                 }
             }
@@ -156,6 +184,21 @@ public class HologramRenderer {
             poseStack.popPose();
         }
 
+        if (anchorPos != null) {
+            BlockState anchorState = mc.level.getBlockState(anchorPos);
+            if (anchorState.is(ModBlocks.BUILDACCESS_BLOCK.get())
+                    && event.getFrustum().isVisible(new AABB(anchorPos))) {
+                poseStack.pushPose();
+                poseStack.translate(anchorPos.getX() - camX, anchorPos.getY() - camY, anchorPos.getZ() - camZ);
+                TintedBufferSource throughWallSource = new TintedBufferSource(
+                        realSource, 1f, 1f, 1f, 1f, EnumSet.allOf(Direction.class));
+                brd.renderSingleBlock(anchorState, poseStack, throughWallSource,
+                        LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+                realSource.endBatch();
+                poseStack.popPose();
+            }
+        }
+
         GL11.glPolygonOffset(0f, 0f);
         GL11.glDisable(GL11.GL_POLYGON_OFFSET_FILL);
         RenderSystem.enableCull();
@@ -166,6 +209,20 @@ public class HologramRenderer {
 
     public static Map<BlockPos, HologramSyncPacket.HologramEntry> getHolograms() {
         return holograms;
+    }
+
+    private static class HologramRenderStateAccess extends RenderStateShard {
+        private HologramRenderStateAccess() {
+            super("build_previewer_hologram_state", () -> {}, () -> {});
+        }
+
+        private static ShaderStateShard translucentShader() { return RENDERTYPE_TRANSLUCENT_SHADER; }
+        private static TextureStateShard blockTexture() { return BLOCK_SHEET_MIPPED; }
+        private static TransparencyStateShard translucentTransparency() { return TRANSLUCENT_TRANSPARENCY; }
+        private static DepthTestStateShard noDepthTest() { return NO_DEPTH_TEST; }
+        private static CullStateShard cull() { return CULL; }
+        private static LightmapStateShard lightmap() { return LIGHTMAP; }
+        private static OverlayStateShard overlay() { return OVERLAY; }
     }
 
     // ── TintedBufferSource ────────────────────────────────────────────────────
@@ -184,7 +241,15 @@ public class HologramRenderer {
 
         @Override
         public VertexConsumer getBuffer(RenderType renderType) {
-            return new TintedVertexConsumer(inner.getBuffer(renderType), r, g, b, a, allowedFaces);
+            RenderType hologramRenderType = isBlockRenderType(renderType) ? HOLOGRAM_BLOCKS : renderType;
+            return new TintedVertexConsumer(inner.getBuffer(hologramRenderType), r, g, b, a, allowedFaces);
+        }
+
+        private static boolean isBlockRenderType(RenderType renderType) {
+            return renderType == RenderType.solid()
+                    || renderType == RenderType.cutout()
+                    || renderType == RenderType.cutoutMipped()
+                    || renderType == RenderType.translucent();
         }
     }
 
